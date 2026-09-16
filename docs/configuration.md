@@ -420,29 +420,9 @@ export PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/path/to/pi-coding-agent-packag
 
 Overrides host-package discovery for spawned children. Foreground CLI resolution uses this root to locate the `pi` CLI script, and the detached background runner uses it for jiti host resolution and peer-package aliases, so both child kinds agree on one host. It is consulted when argv-based automatic discovery cannot identify the host, such as a wrapper install or a non-standard layout. The value must be the root of a canonical `@earendil-works/pi-coding-agent` installation (the directory containing its `package.json`, with that package name); both child kinds still validate the package name and its peer packages from that install tree, so a package whose manifest carries a different name is rejected even with the override set. Empty or whitespace-only values are ignored.
 
-## `intercomBridge`
+## Removed: parent↔child messaging (`intercomBridge`, `contact_supervisor`)
 
-```json
-{
-  "intercomBridge": {
-    "mode": "always",
-    "instructionFile": "./intercom-bridge.md",
-    "resultDelivery": true
-  }
-}
-```
-
-Controls whether subagents receive runtime coordination instructions and whether `contact_supervisor` is auto-added to their tool allowlist when needed.
-
-Fields:
-
-- `mode`: default `always`; use `fork-only` to inject only for forked runs, or `off` to disable the bridge.
-- `instructionFile`: optional Markdown template replacing the default bridge instructions. `{orchestratorTarget}` is interpolated with the parent session target. Relative paths resolve from `~/.pi/agent/extensions/subagent/`. The default template does not name the session, because `contact_supervisor` resolves it from the child runtime config; a template that does name it ties `launchContractDigest` to the parent session, and launch-contract preflight then needs `orchestratorTarget` to match.
-- `resultDelivery`: default `false`; set `true` only when an external listener consumes `subagent:result-intercom` and acknowledges the grouped completion payload. This is optional external result delivery, not native supervisor messaging. Enabled delivery waits for acknowledgement and reports acknowledgement failures. It does not change supervisor asks or progress updates.
-
-Bridge activation requires a targetable current parent session id, which `pi-subagents` passes to children automatically. Native supervisor messaging does not require an external `pi-intercom` installation or per-agent extension allowlists: children use `contact_supervisor`, and parents use `subagent_supervisor` to inspect or reply. Agents can still use an external `intercom` tool when they explicitly request a provider that supplies it.
-
-The default injected guidance tells children to use `contact_supervisor` with `reason: "need_decision"` when blocked or needing a decision, `reason: "progress_update"` only for meaningful blocked/progress updates, and avoid routine completion handoffs.
+The parent↔child messaging channel was removed: subagents run one-shot and report back. A child that cannot safely or legitimately complete its task stops and returns `BLOCKED: <reason>` as a terminal completion status, which the parent observes on the result (`blocked`) and execution projection (`status: "blocked"`). There is no `intercomBridge` config, no `contact_supervisor`/`subagent_supervisor` tools, and no `instructionFile`/`resultDelivery` options. If the key appears in an existing config file it is ignored; old guidance to "reply to a pending supervisor request" no longer applies.
 
 ## `worktreeBaseDir`
 

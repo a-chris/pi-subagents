@@ -106,7 +106,7 @@ For bounded orchestration, `maxSubagentSpawnsPerRun` limits cumulative logical c
 /subagents-doctor
 ```
 
-or ask: "Check whether subagents and intercom are set up correctly."
+or ask: "Check whether subagents are set up correctly."
 
 For installed-version help, use `/subagents-guide [topic]` or `subagent({ action: "guide", topic: "workflows" })`. The default topic is `overview`; available topics are `overview`, `workflows`, `agents`, `missions`, `observability`, `tool-reference`, `configuration`, `models`, `watchdog`, and `extension-api`.
 

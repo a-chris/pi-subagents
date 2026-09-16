@@ -2,7 +2,7 @@
 
 ## What pi-subagents is
 
-pi-subagents lets one Pi session delegate focused work to child agents with supervision, evidence, and control.
+pi-subagents lets one Pi session delegate focused work to child agents with evidence and control. Children run one-shot and report back; there is no mid-run parent↔child messaging channel.
 It serves a single Pi operator first: one person who wants more leverage from one session without losing control of what runs in their name.
 It stays flexible enough for other people and other workflows, but it does not redesign itself around them.
 It owns the Pi delegation layer: child launch contracts, workflow orchestration, supervision, observability, and result handoff.
@@ -18,13 +18,13 @@ Those workflows are capabilities the system must support well, not the product i
 
 Authority is moderate, not maximal in either direction.
 When user intent and policy are clear, safe routine authority can be inferred without a fresh ask.
-A blocked child can ask its supervisor to unblock it before interrupting the user.
+A child that cannot safely or legitimately complete its task stops and reports it: **blocked** is a first-class terminal completion status (`BLOCKED: <reason>`), and the parent decides the follow-up (re-plan, re-run, or escalate).
 User and project instructions can tighten or loosen this authority, and the system respects both directions.
 
 ## Evidence closes work
 
 A child saying it is done is not enough.
-Completion needs evidence: concrete outputs, changed files where change was expected, validation results, or an explicit blocked state.
+Completion needs evidence: concrete outputs, changed files where change was expected, validation results, or an explicit blocked state (the fail-closed report children return when they cannot safely finish).
 When behavior cannot be proven, the system fails closed instead of reporting optimistic success.
 
 ## Compose before inventing

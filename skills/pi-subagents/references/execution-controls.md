@@ -5,6 +5,7 @@ This file is a detailed reference loaded from `skills/pi-subagents/SKILL.md`.
 ## Discovery and Scope Rules
 
 Agent files can live in:
+
 - `~/.pi/agent/agents/**/*.md` — user scope
 - `.pi/agents/**/*.md` — canonical project scope
 - legacy `.agents/**/*.md` — still read for compatibility, but `.pi/agents/` wins on conflicts
@@ -12,6 +13,7 @@ Agent files can live in:
 Saved chain files may still be discovered for management and existing durable run state, but they are not a public execution surface. Author new orchestration with `workflowScript`.
 
 Precedence is by parsed runtime name:
+
 1. project scope
 2. user scope
 3. builtin agents
@@ -231,6 +233,7 @@ subagent({ action: "resume", id: "nested-run-id", message: "Continue this nested
 ```
 
 Resume behavior:
+
 - `resume` revives paused, completed, or failed async/foreground children from persisted session files; stopped runs remain non-resumable, and it does not interrupt live top-level async children.
 - Use `steer` for acknowledged guidance to a live top-level async child.
 - A live nested run can still receive a non-destructive `resume` follow-up through its owner route.
@@ -409,6 +412,7 @@ Use `mission.update` while work runs to record decisions, artifacts, labels, sum
 After compaction, restart, or confusing history, recover from durable state first: `mission.list` in the project, `mission.list` with `missionScope: "global"` for the user-local cross-project pointer index, then `mission.show` for the relevant mission. `mission.show` refreshes linked async status when available and returns warnings instead of hiding the mission if a linked status file is temporarily unreadable. Use the linked run ids with normal `status`, `steer`, `resume`, or `stop` actions. Project mission JSON remains authoritative over chat history.
 
 Routing rule:
+
 - Same project: ordinary mission-backed subagents.
 - Different project, small/bounded task: ordinary async subagent with explicit `cwd`, an authority boundary, and durable output.
 - Several projects with independent work: one async `workflowScript` whose child keys include repo slugs and whose child calls set explicit `cwd`; keep publication and merge decisions serial per repo.
@@ -479,6 +483,7 @@ const final = await runs.run("oracle-consult-follow-up", { resume: first.runId, 
 The parent remains the final decision-maker. Oracle advice does not approve a direction or start implementation.
 
 The intended oracle loop is:
+
 1. the main agent forks to `oracle`
 2. `oracle` reviews direction, drift, assumptions, and risks
 3. `oracle` can coordinate back through `contact_supervisor` when the bridge injects it
@@ -505,54 +510,8 @@ Use `oracle` as a smart-friend escalation when the parent needs help with trajec
 
 Do not use `oracle` or Sol-high models to satisfy routine fresh-review gates, ordinary follow-up reviews, or ordinary performance crit passes. Use the `reviewer` role for those reviews, then escalate only when normal review/bot/CI evidence exposes an unresolved invariant, root-cause, model-routing, or product-tradeoff question.
 
-## Subagent + Intercom Coordination
+## Blocked reporting (no parent\u2194child messaging)
 
-`pi-subagents` includes native supervisor coordination. Child agents can use `contact_supervisor` to ask the exact parent session that spawned them; messages are scoped by parent session id and should not appear in other Pi sessions. Parents inspect or reply with `subagent_supervisor`. This path does not require `pi-intercom`.
+The parent\u2194child messaging channel was removed. Children run one-shot and report back: there are no `contact_supervisor`/`subagent_supervisor` tools and no `intercomBridge`, `intercom`, or `resultDelivery` configuration. A child that cannot safely or legitimately complete its task stops working and returns `BLOCKED: <reason>` (first line of its final output) as a terminal completion status (`blocked` on the result, `status: "blocked"` on the execution projection). The parent observes that status and decides the follow-up: re-plan, re-run with adjusted instructions, or escalate to the operator.
 
-This is separate from optional external completion delivery. Set `intercomBridge.resultDelivery: true` only when an external listener consumes and acknowledges `subagent:result-intercom` grouped results. It does not deliver results by itself, and it does not change native supervisor asks or progress updates.
-
-Generic `intercom` is external or provider-supplied only. Native supervisor coordination injects `contact_supervisor`, not generic `intercom`. Use generic `intercom` only when external bridge instructions provide an explicit safe target. Do not invent a target. Prefer the tool from the injected bridge instructions.
-
-Use `contact_supervisor` with `reason: "need_decision"` when:
-- a subagent is blocked on a decision
-- a child needs clarification instead of guessing
-- an approval, product, API, or scope choice is required before continuing safely
-
-Use `contact_supervisor` with `reason: "interview_request"` when the child needs structured supervisor input rather than a freeform answer. The request waits for a parent reply, so the child should stay alive and continue only after the reply arrives.
-
-Do not use `contact_supervisor` just to resolve review-only/no-project-edit versus progress-writing or output-artifact instructions. The child must not modify project/source files, but returning findings through its normal response or configured output artifact is allowed unless the parent explicitly set `output: false`.
-
-Use `contact_supervisor` with `reason: "progress_update"` when:
-- a child is explicitly asked for progress
-- a meaningful discovery changes the plan
-- a long-running child needs to report a blocked/progress checkpoint without waiting for normal tool return flow
-
-Message conventions:
-- `reason: "need_decision"` and `reason: "interview_request"` wait for the parent reply and return it to the child.
-- `reason: "progress_update"` is non-blocking and should stay concise.
-- Child-side routine completion handoffs are not expected. Native supervisor messages are for decisions, structured input, and meaningful progress updates while a child is still running.
-
-If bridge instructions provide the child-facing tool, a child can ask:
-
-```typescript
-contact_supervisor({
-  reason: "need_decision",
-  message: "Should I optimize for readability or performance here?"
-})
-```
-
-The parent replies with the native supervisor tool:
-
-```typescript
-subagent_supervisor({ action: "reply", message: "Optimize for readability." })
-```
-
-Or inspects unresolved asks first:
-
-```typescript
-subagent_supervisor({ action: "pending" })
-```
-
-Native supervisor coordination does not expose generic `intercom` as a fallback. Use `subagent_supervisor` for parent replies.
-
-If intercom messages do not show up, run `subagent({ action: "doctor" })` or `/subagents-doctor`.
+Report `BLOCKED:` only when the child truly cannot safely finish. Do not use it for routine completion handoffs, review-only versus progress-writing instruction conflicts, or a missing optional output path.

@@ -36,7 +36,7 @@ Agents use the `subagent(...)` tool for execution, management, status, and contr
 - `/subagent-cost` — show parent plus child token usage and cost for the session
 - `/subagents-fleet` — open the live fleet inspector with per-child controls; `↑↓`/`jk` selects children, `PgUp`/`PgDn` scrolls transcript detail, `s` steers the selected live async child, and `D` stops its top-level async run after confirmation
 - `/subagents-watchdog` — inspect or configure the opt-in adversarial change watchdog (model, on/off, recommend-model, check)
-- `/subagents-doctor` — diagnose setup, discovery, async paths, and intercom bridge state
+- `/subagents-doctor` — diagnose setup, discovery, async paths, and runtime state
 - `/subagents-models [agent]` — show the live runtime-loaded builtin model mapping
 - `/subagents-profiles`, `/subagents-load-profile`, `/subagents-refresh-provider-models`, `/subagents-generate-profiles`, `/subagents-check-profile` — manage model profiles and provider catalogs
 - `/prompt-workflow` — run a prompt template through native workflowScript execution
@@ -45,6 +45,7 @@ Prefer the tool when you are writing agent logic. Prefer the slash commands when
 you are guiding a human through an interactive flow.
 
 Packaged prompt shortcuts are also available for repeatable workflows. Treat them as reusable orchestration recipes, not just human slash commands. When the user asks for one of these shapes, apply the same pattern directly with `subagent(...)` and other tools:
+
 - `/parallel-review` — fresh-context reviewers with distinct review angles, then synthesis
 - `/review-loop` — parent-orchestrated worker, fresh-reviewer, and fix-worker cycles until clean or capped
 - `/parallel-research` — combine `researcher` and `scout` for external evidence plus local code context
@@ -75,6 +76,7 @@ Use this when the user wants adversarial review of a diff, plan, issue, file, or
 Use this only within operator-authorized delegation when `{ action: "list" }` reports skill subagent suggestions relevant to the requested handoff. Availability is a selection hint, not authority or a command to fan out.
 
 Default guardrails:
+
 - Keep the fanout small: usually one or two skill-specialist children, never more than the listed recommendations or configured cap.
 - Prefer `context: "fresh"` and include only the files, diff, plan, URL, or request details each child needs. Use forked context only when private/session history is essential and appropriate to share.
 - Use read-only agents for analysis/review unless implementation was explicitly requested; do not create several writers in the same worktree.
@@ -105,8 +107,6 @@ As a conservative orchestration policy, do not pass a hard `toolBudget` to an im
 ### Parallel research technique
 
 Use this when the question needs both external evidence and local implications. Combine `researcher` for official docs, specs, ecosystem behavior, recent changes, benchmarks, and primary sources with `scout` for repository files, patterns, constraints, tests, and likely integration points. Give each child a distinct angle: external evidence, local code context, and practical tradeoffs. Ask for source links or file ranges, confidence level, gaps, and decision implications. Do not ask these children to edit unless implementation was explicitly requested.
-
-
 
 ### Gather-context-and-clarify technique
 
@@ -237,6 +237,7 @@ For model fleets, use the profile commands instead of hand-editing repeated over
 Builtin role agents inherit the current Pi default model unless you override them. When launching them, write the task prompt as a compact contract, not a long procedural script. Define the destination and let the role choose the efficient path.
 
 A strong subagent prompt usually includes:
+
 - **Goal**: the concrete outcome the child should produce.
 - **Target**: repository, explicit `cwd`, branch/ref/head, and source seam when the target is not the parent cwd.
 - **Authority boundary**: whether the child may read, edit, commit, push, comment, close, merge, publish, or release. Omit or forbid actions that are not approved.
@@ -245,7 +246,7 @@ A strong subagent prompt usually includes:
 - **Hard constraints**: true invariants only, such as no edits for review-only tasks, one writer thread, child must not run subagents unless it is explicitly authorized through `tools: subagent` or `allowNestedSubagents: true`, or escalation for unapproved decisions.
 - **Validation**: targeted checks to run, or the next-best check when validation is impossible.
 - **Output**: the expected summary shape, artifact path, or finding format. Use managed artifact paths for scratch reports; reserve repo-qualified absolute paths for durable handoffs that the user approved.
-- **Stop rules**: when to ask via `intercom` or `contact_supervisor`, when to stop after enough evidence, and when not to keep searching.
+- **Stop rules**: when to stop because enough evidence exists, when to report `BLOCKED:` because the task cannot be safely completed, and when not to keep searching.
 
 Give each role useful discovery anchors. Name source roots, filenames, symbols, types, methods, and paths for scouts. Give workers context files, plans, task paths, and named source seams before asking them to search. Give reviewers changed files, contracts, and any exhaustive-verification target. Tell oracle whether current source behavior, product/policy documents, plans, or inherited decisions are the evidence that matters.
 
@@ -254,6 +255,7 @@ Avoid carrying over old prompt habits that over-specify every step. Use `must`, 
 For implementation handoffs, name the approved scope and success criteria more clearly than the process. Good prompts say what to change, what not to change, where the evidence lives, how to validate, and when to escalate. They should not ask the child to create another subagent plan or continue the parent conversation.
 
 Settings locations:
+
 - User scope: `~/.pi/agent/settings.json`
 - Project scope: `.pi/settings.json`
 

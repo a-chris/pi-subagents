@@ -247,7 +247,7 @@ const result = await resolveSubagentLaunchContract({
 if (!result.ok) {
   // missing_agent, ambiguous_agent, missing_skill, denied_required_tool,
   // invalid_artifact_dir, invalid_cwd, unsupported_mode, restricted_agent,
-  // thinking_ceiling, invalid_extension_bindings, or invalid_intercom_bridge
+  // thinking_ceiling, invalid_extension_bindings
   throw new Error(result.message);
 }
 
@@ -257,17 +257,16 @@ console.log(result.contract.digest, result.contract.tools.effectiveAllowlist);
 Preflight covers ordinary single-agent launch resolution:
 
 - Selected agent identity and shadowed candidates.
-- A parsed-definition digest, including system prompt and launch-affecting model, tool, skill, extension, output, and memory fields. Runtime overlays such as the Intercom bridge never change it.
+- A parsed-definition digest, including system prompt and launch-affecting model, tool, skill, extension, output, and memory fields.
 - Fresh/fork context, effective model and thinking, skill and tool resolution, direct MCP selections, runtime/configured extensions.
-- The resolved Intercom bridge state (`intercomBridge.mode` and `intercomBridge.active`). An active bridge appends the bridge instruction to the child prompt and adds `contact_supervisor` to a declared tool list, exactly as execution does.
+- The child’s runtime launch contract: agent definition digest, resolved system prompt, tool plan, and context resolution. It no longer carries intercom/supervisor state — the parent↔child messaging channel was removed.
 - Artifact/session paths, async lifecycle/status/result/event/process-terminal paths, package/lifecycle versions, capability-ceiling audit data, and stable digests.
 
 `launchContractDigest` is the canonical digest of the caller task, effective system prompt (including an active bridge instruction), model candidates, effective tools/extensions/MCP (including inherited capability ceilings and the bridge tool), output binding, and structured-output schema that ordinary foreground and async execution report in results/status/events and metadata. Preflight and each execution path that reports the digest assemble it through one shared binding, so equal inputs produce equal digests.
 
 Bridge inputs:
 
-- `intercomBridge` replaces the global `intercomBridge` config for this launch, with the same semantics as the `subagent` tool and delegation overrides. Pass the same value to the launch you compare against. Preflight reads the global config from disk on each call while the running extension keeps the config it loaded at startup, so pass the override when the digest must not depend on that file.
-- The default bridge instruction never names the parent session, so most hosts need no further input. When the configured `instructionFile` interpolates `{orchestratorTarget}`, preflight reports a `host_required` diagnostic unless the host supplies a non-empty `orchestratorTarget`; the executor derives that target with `resolveIntercomSessionTarget` from `pi-subagents/intercom-bridge`, given the parent session name and id.
+- The launch-contract digest no longer depends on an intercom bridge; the parent↔child messaging channel was removed.
 
 Boundaries:
 
@@ -337,7 +336,7 @@ Bounds:
 
 - Schemas are capped at 64 KiB; tasks and returned text/structured values are capped at 1 MiB, with smaller bounds on identity/configuration strings and a maximum `timeoutMs` of 2,147,483,647.
 - Structured delegation accepts `toolBudget: { hard: 0, block: "*" }` to block the first tool call and run a zero-tool leaf; ordinary model-facing/configured budgets keep their existing minimum of one.
-- `intercomBridge` optionally replaces the global bridge config for one delegation, for example `{ mode: "off" }` when no supervisor session will answer the child. Pass the same value to `resolveSubagentLaunchContract` to compare `launchContractDigest` against the terminal response.
+
 - The foreground bridge retains up to 8,192 exact pending-cancellation and settled-attempt identities per extension context. If either history fills, it fails closed with `unavailable_context` for later starts rather than evicting identity facts; lifecycle reset clears the bounded history.
 
 Constraints:
@@ -525,7 +524,7 @@ When pi-subagents runs inside a compatible pi-web host, it discovers the version
 If your host reclaims idle sessions, keep a session alive while it still has live detached work:
 
 - Read run state from the status files under the async run directory rather than from event traffic. A long, quiet workflow sends almost nothing to the parent, so recent-activity heuristics conclude the wrong thing.
-- Treat `queued` and `running` as live, matching `isActiveAsyncState`. An interrupted run that is `paused` is finalized. A workflow that paused because a child used `contact_supervisor` still has a live child; keep that parent session until reconcile writes `complete` or `failed`.
+- Treat `queued` and `running` as live, matching `isActiveAsyncState`. An interrupted run that is `paused` is finalized; children report one-shot and never hold a supervisor request open, so a paused workflow reflects detached or interrupted children, not a pending message round-trip.
 - Do not treat `lastUpdate` as a heartbeat. The runner advances it in memory every second but only rewrites `status.json` when the activity classification changes, so a live run inside one long quiet tool call leaves a stale file behind. Judging liveness by file age will reap exactly the run you meant to protect.
 - Prefer the recorded runner `pid`, which stays true through a silent tool call and goes false when the runner dies. Keep file age only as a fallback for runs that record no pid, and give it a wide window.
 - Match `sessionId` in `status.json` against both forms. It is resolved as `getSessionFile() ?? getSessionId()`, so it is normally the parent's session *file path*, but a session that is not persisted records a bare session id instead.
@@ -556,7 +555,7 @@ The main runtime files in this repository:
 | `src/workflows/scripted-workflow.ts` / `src/runs/foreground/subagent-executor.ts` | Scripted workflow orchestration and child launch routing. |
 | `src/shared/settings.ts` | Chain behavior, instructions, and config helpers. |
 | `src/runs/shared/worktree.ts` | Git worktree isolation. |
-| `src/intercom/intercom-bridge.ts` | Runtime intercom bridge instructions and diagnostics. |
+
 | `src/extension/schemas.ts` / `src/shared/types.ts` | Tool schemas, shared types, and event constants. |
 | `test/unit/` / `test/integration/` | Unit and loader-based integration tests. |
 
