@@ -272,7 +272,7 @@ const ControlOverrides = Type.Object({
 		description: "Control event types that should notify the parent/orchestrator. Defaults to active_long_running and needs_attention.",
 	})),
 	notifyChannels: Type.Optional(Type.Array(Type.String({ enum: ["event", "async", "intercom"] }), {
-		description: "Notification channels to use when available. Defaults to event, async, and intercom.",
+		description: "Notification channels to use when available. Defaults to event and async.",
 	})),
 });
 

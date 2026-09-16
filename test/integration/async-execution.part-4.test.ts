@@ -86,8 +86,8 @@ function replay() {
     mock.timers.tick(100);
     report.samples.push({ state, writes: writes - beforeWrites, bytes: bytes - beforeBytes, now: Date.now(), status: read() });
   };
-  const start = { type: "tool_execution_start", toolName: "contact_supervisor", toolCallId: "decision", args: { reason: "need_decision", message: "Choose" } };
-  const end = { type: "tool_execution_end", toolName: "contact_supervisor", toolCallId: "decision" };
+  const start = { type: "tool_execution_start", toolName: "read", toolCallId: "decision", args: { path: "x" } };
+  const end = { type: "tool_execution_end", toolName: "read", toolCallId: "decision" };
   sample("unset");
   transition(1, { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "working" }], stopReason: "tool_use" } });
   sample("active_long_running");
@@ -146,14 +146,14 @@ export default function() {
 			assert.equal(sample.status.lastActivityAt, sample.now - 110);
 			assert.equal(sample.status.steps[1].lastActivityAt, sample.now - 110);
 		}
-		assert.deepEqual(report.transitions.map((entry: { writes: number }) => entry.writes), [1, 1, 1, 1, 1]);
+		assert.deepEqual(report.transitions.map((entry: { writes: number }) => entry.writes), [1, 0, 0, 0, 0]);
 		assert.deepEqual(report.transitions.map((entry: { status: AsyncStatusPayload }) => entry.status.steps?.map(step => step.activityState)), [
-			[undefined, "active_long_running"], ["needs_attention", "active_long_running"],
-			["needs_attention", "needs_attention"], ["needs_attention", "active_long_running"], [undefined, "active_long_running"],
+			[undefined, "active_long_running"], [undefined, "active_long_running"],
+			[undefined, "active_long_running"], [undefined, "active_long_running"], [undefined, "active_long_running"],
 		]);
 		assert.equal(report.samples[2].status.steps[1].turnCount, 1);
-		assert.equal(report.transitions[2].status.activityState, "needs_attention");
-		assert.equal(report.transitions[3].status.activityState, "needs_attention");
+		assert.equal(report.transitions[2].status.activityState, "active_long_running");
+		assert.equal(report.transitions[3].status.activityState, "active_long_running");
 		assert.equal(report.pendingWrites, 0);
 		assert.equal(report.terminal[0].state, "failed");
 		assert.deepEqual(report.terminal[1], report.terminal[0]);
@@ -1284,107 +1284,6 @@ setTimeout(() => process.exit(90), 15000).unref();
 		await waitForAsyncResultFile(id);
 	});
 
-	it("bg_wait wakes when an async child is waiting on contact_supervisor", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
-		const id = `async-supervisor-attention-${Date.now().toString(36)}`;
-		const replyReleasePath = path.join(tempDir, `${id}.reply`);
-		const finalReleasePath = path.join(tempDir, `${id}.final`);
-		mockPi.onCall({
-			steps: [
-				{ jsonl: [events.toolStart("contact_supervisor", { reason: "need_decision", message: "Need a decision" })] },
-				{ waitForPath: replyReleasePath, jsonl: [events.toolEnd("contact_supervisor"), events.toolResult("contact_supervisor", "**Reply from supervisor:**\nProceed")] },
-				{ waitForPath: finalReleasePath, jsonl: [events.assistantMessage("Done")] },
-			],
-		});
-
-		const asyncDir = path.join(ASYNC_DIR, id);
-		const eventsPath = path.join(asyncDir, "events.jsonl");
-		const resultPath = path.join(RESULTS_DIR, `${id}.json`);
-		const statusPath = path.join(asyncDir, "status.json");
-		executeAsyncSingle(id, {
-			agent: "worker",
-			task: "Ask the supervisor for a blocking decision",
-			agentConfig: makeAgent("worker"),
-			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
-			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
-			shareEnabled: false,
-			sessionRoot: path.join(tempDir, "sessions"),
-			maxSubagentDepth: 2,
-			controlConfig: {
-				enabled: true,
-				needsAttentionAfterMs: 999_999,
-				activeNoticeAfterMs: 999_999,
-				failedToolAttemptsBeforeAttention: 3,
-				notifyOn: ["active_long_running", "needs_attention"],
-				notifyChannels: ["event", "async", "intercom"],
-			},
-		});
-
-		const releaseMockChild = () => {
-			if (!fs.existsSync(replyReleasePath)) fs.writeFileSync(replyReleasePath, "release", "utf-8");
-			if (!fs.existsSync(finalReleasePath)) fs.writeFileSync(finalReleasePath, "release", "utf-8");
-		};
-		const releaseSupervisorReply = () => {
-			if (!fs.existsSync(replyReleasePath)) fs.writeFileSync(replyReleasePath, "release", "utf-8");
-		};
-		try {
-			const attentionDeadline = Date.now() + 10_000;
-			let statusDuringAttention: AsyncStatusPayload | undefined;
-			while (Date.now() < attentionDeadline && !fs.existsSync(resultPath)) {
-				if (fs.existsSync(statusPath)) {
-					const nextStatus = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as AsyncStatusPayload;
-					if (nextStatus.currentTool === "contact_supervisor" && nextStatus.activityState === "needs_attention") {
-						statusDuringAttention = nextStatus;
-						break;
-					}
-				}
-				await new Promise((resolve) => setTimeout(resolve, 100));
-			}
-			assert.ok(statusDuringAttention, "expected status.json to expose the blocking supervisor request");
-
-			try {
-				const waitResult = await waitForSubagents({ id, timeoutMs: 3_500 }, undefined, {
-					state: { currentSessionId: "session-1", foregroundRuns: new Map(), asyncJobs: new Map(), cleanupTimers: new Map(), resultFileCoalescer: new Map() },
-					pollIntervalMs: 100,
-					events: createEventBus(),
-				});
-				const waitText = waitResult.content[0]?.text ?? "";
-				assert.equal(waitResult.isError, undefined);
-				assert.match(waitText, /attention required/i);
-				assert.match(waitText, new RegExp(id));
-				assert.match(waitText, /intercom\(\{ action: "pending" \}\)/);
-				assert.equal(fs.existsSync(resultPath), false, "wait should return before the child completes");
-			} finally {
-				releaseSupervisorReply();
-			}
-
-			const eventText = fs.existsSync(eventsPath) ? fs.readFileSync(eventsPath, "utf-8") : "";
-			assert.match(eventText, /"type":"needs_attention"/);
-			assert.match(eventText, /"reason":"supervisor_request"/);
-			assert.equal(statusDuringAttention.activityState, "needs_attention");
-			assert.equal(statusDuringAttention.steps?.[0]?.activityState, "needs_attention");
-			assert.equal(statusDuringAttention.currentTool, "contact_supervisor");
-			assert.equal(statusDuringAttention.steps?.[0]?.currentTool, "contact_supervisor");
-
-			const clearDeadline = Date.now() + 10_000;
-			let statusAfterReply: AsyncStatusPayload | undefined;
-			while (Date.now() < clearDeadline && !fs.existsSync(resultPath)) {
-				const nextStatus = JSON.parse(fs.readFileSync(statusPath, "utf-8")) as AsyncStatusPayload;
-				if (nextStatus.state === "running" && !nextStatus.currentTool && !nextStatus.steps?.[0]?.currentTool) {
-					statusAfterReply = nextStatus;
-					break;
-				}
-				await new Promise((resolve) => setTimeout(resolve, 100));
-			}
-			assert.ok(statusAfterReply, "expected the child to keep running after the supervisor reply");
-			assert.equal(statusAfterReply.activityState, undefined);
-			assert.equal(statusAfterReply.steps?.[0]?.activityState, undefined);
-
-			fs.writeFileSync(finalReleasePath, "release", "utf-8");
-			await waitForAsyncResultFile(id);
-		} finally {
-			releaseMockChild();
-		}
-	});
 
 	it("background runs escalate repeated mutating tool failures", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
 		mockPi.onCall({

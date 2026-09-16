@@ -31,6 +31,33 @@ const STRUCTURED_OUTPUT_INSTRUCTIONS = [
 	"Do not rely on prose-only completion; if you do not call `structured_output`, the parent will fail this step.",
 ].join("\n");
 
+export /** Typed domain view of a runtime hook payload; each handler reads only its slice. */
+interface RuntimeHookEvent {
+	toolName?: string;
+	input?: unknown;
+	messages?: unknown[];
+	systemPrompt?: string;
+	payload?: unknown;
+}
+
+/** Named domain type for the record-shaped messages this module sanitizes. */
+interface RuntimeRecord extends Record<string, unknown> {}
+
+/** Named domain type for unparsed values crossing the pi runtime I/O boundary. */
+type RuntimeValue = unknown;
+
+function isRecord(value: RuntimeValue): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isString(value: RuntimeValue): value is string {
+	return typeof value === "string";
+}
+
+function isFunction(value: RuntimeValue): value is (...args: never[]) => unknown {
+	return typeof value === "function";
+}
+
 export const CHILD_SUBAGENT_BOUNDARY_INSTRUCTIONS = [
 	"You are a child subagent, not the parent orchestrator.",
 	"The parent session owns delegation, orchestration, review fanout, and follow-up worker launches.",
@@ -68,9 +95,9 @@ function registerRuntimeExtensionAcknowledgements(pi: ExtensionAPI, sink: ((ids:
 	if (!sink) return;
 	const ids: string[] = [];
 	let finalized = false;
-	const acknowledge = (payload: unknown): undefined => {
-		if (finalized || !payload || typeof payload !== "object") return undefined;
-		const id = (payload as { id?: unknown }).id;
+	const acknowledge = (payload: RuntimeValue): undefined => {
+		if (finalized || !isRecord(payload)) return undefined;
+		const id = payload.id;
 		if (isRuntimeAcknowledgedExtensionId(id)) ids.push(id);
 		return undefined;
 	};
@@ -81,10 +108,10 @@ function registerRuntimeExtensionAcknowledgements(pi: ExtensionAPI, sink: ((ids:
 		return undefined;
 	};
 	try {
-		const events = (pi as { events?: { on?: (event: string, handler: (payload: unknown) => unknown) => unknown } }).events;
+		const events = (pi as { events?: { on?: (event: string, handler: (payload: RuntimeValue) => void) => void } }).events;
 		events?.on?.(RUNTIME_EXTENSION_ACK_EVENT, acknowledge);
 		// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the runtime events these sinks consume.
-		const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event?: unknown, ctx?: unknown) => unknown) => void;
+		const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: RuntimeHookEvent, ctx: ExtensionContext) => void) => void;
 		onRuntimeEvent("agent_end", finalize);
 		onRuntimeEvent("session_shutdown", finalize);
 	} catch {
@@ -222,19 +249,19 @@ export function rewriteSubagentPrompt(
 	return `${boundary}${structured}\n\n${rewritten}`;
 }
 
-function isParentOnlySubagentMessage(message: unknown): boolean {
+function isParentOnlySubagentMessage(message: RuntimeValue): boolean {
 	const m = message as { role?: string; customType?: string };
 	if (m?.role !== "custom" || typeof m.customType !== "string") return false;
 	if (m.customType === SUBAGENT_WATCHDOG_WARNING_TYPE) return true;
 	return PARENT_ONLY_CUSTOM_MESSAGE_TYPES.has(m.customType);
 }
 
-function isSubagentToolResultMessage(message: unknown): boolean {
+function isSubagentToolResultMessage(message: RuntimeValue): boolean {
 	const m = message as { role?: string; toolName?: string };
 	return m?.role === "toolResult" && m.toolName === "subagent";
 }
 
-function isSubagentToolCallBlock(block: unknown): boolean {
+function isSubagentToolCallBlock(block: RuntimeValue): boolean {
 	const b = block as { type?: string; name?: string };
 	return b?.type === "toolCall" && b.name === "subagent";
 }
@@ -254,14 +281,21 @@ const PROMPT_CACHE_KEY_APIS = new Set([
 	"openai-responses",
 ]);
 
-export function rewriteForkCacheProviderRequest(event: BeforeProviderRequestEvent, ctx: Pick<ExtensionContext, "model"> | undefined, forkCacheKey: string | undefined): unknown {
+/** Decode the fork-cache provider request at the I/O boundary into a typed payload. */
+function decodeForkCacheRequest(event: BeforeProviderRequestEvent): { payload: Record<string, unknown> } | undefined {
+	if (!isRecord(event)) return undefined;
+	const payload = event.payload;
+	if (!isRecord(payload)) return undefined;
+	if (!isString(payload.prompt_cache_key)) return undefined;
+	return { payload };
+}
+
+export function rewriteForkCacheProviderRequest(event: BeforeProviderRequestEvent, ctx: Pick<ExtensionContext, "model"> | undefined, forkCacheKey: string | undefined): Record<string, unknown> | undefined {
 	const key = forkCacheKey?.trim();
 	if (!key || !PROMPT_CACHE_KEY_APIS.has(ctx?.model?.api ?? "")) return undefined;
-	if (!event || typeof event !== "object") return undefined;
-	const payload = event.payload;
-	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
-	if (typeof (payload as { prompt_cache_key?: unknown }).prompt_cache_key !== "string") return undefined;
-	return { ...payload, prompt_cache_key: key };
+	const decoded = decodeForkCacheRequest(event);
+	if (!decoded) return undefined;
+	return { ...decoded.payload, prompt_cache_key: key };
 }
 
 function portableToolId(id: string): string {
@@ -271,32 +305,31 @@ function portableToolId(id: string): string {
 	return `tool_${createHash("sha256").update(id).digest("base64url")}`;
 }
 
-function sanitizeToolHistoryMessage(message: unknown): unknown {
-	const m = message as { role?: string; content?: unknown; toolCallId?: unknown };
-	if (m?.role === "toolResult" && typeof m.toolCallId === "string") {
-		const toolCallId = portableToolId(m.toolCallId);
-		return toolCallId === m.toolCallId ? message : { ...m, toolCallId };
+function sanitizeToolHistoryMessage(message: RuntimeRecord): RuntimeRecord {
+	if (message.role === "toolResult" && isString(message.toolCallId)) {
+		const toolCallId = portableToolId(message.toolCallId);
+		return toolCallId === message.toolCallId ? message : { ...message, toolCallId };
 	}
-	if (m?.role !== "assistant" || !Array.isArray(m.content)) return message;
+	if (message.role !== "assistant" || !Array.isArray(message.content)) return message;
 	let changed = false;
-	const content = m.content.map((block) => {
+	const content = message.content.map((block) => {
+		// SAFETY: pi message content blocks are record-shaped tool calls or text; the assertion narrows the block for id sanitization.
 		const b = block as { type?: string; id?: unknown };
-		if (b?.type !== "toolCall" || typeof b.id !== "string") return block;
+		if (b?.type !== "toolCall" || !isString(b.id)) return block;
 		const id = portableToolId(b.id);
 		if (id === b.id) return block;
 		changed = true;
 		return { ...b, id };
 	});
-	return changed ? { ...m, content } : message;
+	return changed ? { ...message, content } : message;
 }
 
-function stripAssistantSubagentToolCallBlocks(message: unknown): unknown | undefined {
-	const m = message as { role?: string; content?: unknown };
-	if (m?.role !== "assistant" || !Array.isArray(m.content)) return message;
-	const filteredContent = m.content.filter((block) => !isSubagentToolCallBlock(block));
-	if (filteredContent.length === m.content.length) return message;
+function stripAssistantSubagentToolCallBlocks(message: RuntimeRecord): RuntimeRecord | undefined {
+	if (message.role !== "assistant" || !Array.isArray(message.content)) return message;
+	const filteredContent = message.content.filter((block) => !isSubagentToolCallBlock(block));
+	if (filteredContent.length === message.content.length) return message;
 	if (filteredContent.length === 0) return undefined;
-	return { ...m, content: filteredContent };
+	return { ...message, content: filteredContent };
 }
 
 export function stripParentOnlySubagentMessages(messages: unknown[], options: { sanitizeToolIds?: boolean; preserveFanoutToolHistory?: boolean } = {}): unknown[] {
@@ -309,7 +342,8 @@ export function stripParentOnlySubagentMessages(messages: unknown[], options: { 
 			changed = true;
 			continue;
 		}
-		const stripped = preserveCurrentFanoutToolHistory ? message : stripAssistantSubagentToolCallBlocks(message);
+		const recordMessage = isRecord(message) ? message : {};
+		const stripped = preserveCurrentFanoutToolHistory ? recordMessage : stripAssistantSubagentToolCallBlocks(recordMessage);
 		if (stripped === undefined) {
 			changed = true;
 			continue;
@@ -342,9 +376,9 @@ export function registerPermissionGate(
 	const rawWatchdogConfig = childWatchdog ? JSON.stringify(childWatchdog) : undefined;
 	const timeoutMs = childWatchdog?.agentEndTimeoutMs ?? 30_000;
 	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the tool_call events this child runtime consumes.
-	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string; input?: unknown }, ctx: ExtensionContext) => unknown) => void;
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: RuntimeHookEvent, ctx: ExtensionContext) => void) => void;
 	onRuntimeEvent("tool_call", async (event, ctx) => {
-		const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+		const toolName = isString(event.toolName) ? event.toolName : "tool";
 		const decision = permissionDecision(rules, toolName);
 		if (decision === "allow") return undefined;
 		if (decision === "deny") return { block: true, reason: `Blocked by pi-subagents permission rule: '${toolName}' is denied.` };
@@ -360,7 +394,7 @@ export function registerPermissionGate(
 					args: event.input ?? {},
 					rawWatchdogConfig,
 					auditPath: permissions.auditPath,
-					...(ctx.signal ? { signal: ctx.signal } : {}),
+					signal: ctx.signal,
 				}),
 				new Promise<WatchdogPermissionResult>((resolve) => {
 					if (!ctx.signal) return;
@@ -387,9 +421,9 @@ function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undef
 	let softNudged = false;
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
 	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the tool_call events this budget sink consumes.
-	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string }) => unknown) => void;
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: RuntimeHookEvent) => void) => void;
 	onRuntimeEvent("tool_call", (event) => {
-		const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+		const toolName = isString(event.toolName) ? event.toolName : "tool";
 		toolCount++;
 		if (budget.soft !== undefined && toolCount >= budget.soft && !softNudged) {
 			softNudged = true;
@@ -472,11 +506,11 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 		resultFileCoalescer: { schedule: () => false, clear: () => {} },
 	} as unknown as SubagentState;
 	const nestedRootRunId = inheritedNestedRouteOf(config)?.rootRunId;
-	if (typeof pi.registerTool === "function") registerWaitTool(pi, waitState, config.waitTool.enabled, undefined, config.waitTool.defaultTimeoutMs, { nestedRootRunId });
+	if (isFunction(pi.registerTool)) registerWaitTool(pi, waitState, config.waitTool.enabled, undefined, config.waitTool.defaultTimeoutMs, { nestedRootRunId });
 	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the runtime lifecycle events this child runtime consumes.
-	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: unknown, ctx?: ExtensionContext) => unknown) => void;
-	onRuntimeEvent("session_start", (_event: unknown, ctx?: ExtensionContext) => {
-		const sessionManager = (ctx as { sessionManager?: Parameters<typeof resolveCurrentSessionId>[0] } | undefined)?.sessionManager;
+	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: RuntimeHookEvent, ctx?: ExtensionContext) => void) => void;
+	onRuntimeEvent("session_start", (_event, ctx) => {
+		const sessionManager = ctx?.sessionManager;
 		waitState.currentSessionId = sessionManager ? resolveCurrentSessionId(sessionManager) : null;
 	});
 	onRuntimeEvent("agent_start", () => {
@@ -485,11 +519,11 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 		config.toolDiagnostic?.(diagnostic);
 		if (diagnostic) throw new Error(formatChildToolDiagnostic(diagnostic));
 	});
-	onRuntimeEvent("agent_end", async (_event: unknown, ctx: unknown) => {
-		if ((ctx as { hasUI?: boolean } | undefined)?.hasUI === true) drainObservation?.deny();
+	onRuntimeEvent("agent_end", async (_event, ctx) => {
+		if (ctx?.hasUI === true) drainObservation?.deny();
 		if (drainObservation) {
 			try {
-				if ((ctx as ExtensionContext)?.sessionManager?.getSessionFile() !== waitState.currentSessionId) drainObservation.deny();
+				if (ctx?.sessionManager?.getSessionFile() !== waitState.currentSessionId) drainObservation.deny();
 			} catch { drainObservation.deny(); }
 		}
 		config.holdFinalDrain?.(true);
@@ -501,10 +535,13 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 	});
 	if (config.structuredOutput) registerStructuredOutputTool(pi, config.structuredOutput);
 
-	onRuntimeEvent("before_provider_request", (event: unknown, ctx?: ExtensionContext) => rewriteForkCacheProviderRequest(event as BeforeProviderRequestEvent, ctx, config.forkCacheKey));
+	onRuntimeEvent("before_provider_request", (event, ctx) => {
+		// SAFETY: the provider request event carries the fork-cache payload shape this rewrite consumes.
+		return rewriteForkCacheProviderRequest(event as BeforeProviderRequestEvent, ctx, config.forkCacheKey);
+	});
 
-	onRuntimeEvent("context", (event: unknown, ctx?: ExtensionContext) => {
-		if (!event || typeof event !== "object" || !("messages" in event) || !Array.isArray(event.messages)) return undefined;
+	onRuntimeEvent("context", (event, ctx) => {
+		if (!Array.isArray(event.messages)) return undefined;
 		const messages = stripParentOnlySubagentMessages(event.messages, {
 			sanitizeToolIds: !COMPOSITE_TOOL_ID_APIS.has(ctx?.model?.api ?? ""),
 			preserveFanoutToolHistory: config.fanoutChild,
@@ -513,9 +550,9 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 		return { messages };
 	});
 
-	onRuntimeEvent("before_agent_start", async (event: unknown) => {
-		if (!event || typeof event !== "object" || !("systemPrompt" in event) || typeof event.systemPrompt !== "string") return undefined;
-		const childSessionName = config.intercomSessionName || config.sessionName;
+	onRuntimeEvent("before_agent_start", async (event) => {
+		if (!isString(event.systemPrompt)) return undefined;
+		const childSessionName = config.sessionName;
 		if (childSessionName && pi.setSessionName) {
 			pi.setSessionName(childSessionName);
 		}

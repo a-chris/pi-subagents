@@ -472,7 +472,7 @@ export function resolvePiLaunchToolPlan(
 	];
 	// Upward contact stays in the --tools allowlist but is not a strict
 	// requirement: children register contact_supervisor at runtime through
-	// the native supervisor channel (or pi-intercom). The pre-0.50 bridge always
+	// context. The pre-0.50 bridge always
 	// appended intercom alongside contact_supervisor, so that exact pairing is
 	// legacy plumbing, not a user demand for an external intercom provider;
 	// a lone intercom entry stays strictly required (#1207).

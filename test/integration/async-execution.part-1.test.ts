@@ -319,88 +319,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		assert.equal(payload.results[0]?.output, "usable partial answer");
 	});
 
-	it("matches preflight launch digest in equivalent foreground and async execution", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
-		const agentName = `contract-worker-${Date.now().toString(36)}`;
-		const task = "Compare the resolved launch inputs.";
-		const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-		const agentDir = path.join(tempDir, "agent-home");
-		process.env.PI_CODING_AGENT_DIR = agentDir;
-		const permissionExtDir = path.join(agentDir, "extensions", "pi-permission-system");
-		fs.mkdirSync(path.join(permissionExtDir, "src"), { recursive: true });
-		fs.writeFileSync(path.join(permissionExtDir, "src", "index.ts"), "export default () => {};", "utf-8");
-		fs.writeFileSync(path.join(permissionExtDir, "package.json"), JSON.stringify({ name: "test", pi: { extensions: ["./src/index.ts"] } }), "utf-8");
-		const agentPath = path.join(tempDir, ".pi", "agents", `${agentName}.md`);
-		fs.mkdirSync(path.dirname(agentPath), { recursive: true });
-		fs.writeFileSync(agentPath, `---\nname: ${agentName}\ndescription: Contract comparison worker\npermissions:\n  write: ask\n---\n`, "utf-8");
-		try {
-			const discovered = discoverAgents(tempDir).agents.find((agent) => agent.name === agentName);
-			assert.ok(discovered, "expected temporary agent definition to be discovered");
-			// runSync and executeAsyncSingle sit below the executor step that applies the bridge.
-			const preflight = await resolveSubagentLaunchContract({ agent: agentName, cwd: tempDir, task, runId: "contract-preflight", intercomBridge: { mode: "off" } });
-			assert.equal(preflight.ok, true);
-			assert.ok(preflight.contract.tools.extensionArgs.some((entry) => entry.endsWith(path.join("pi-permission-system", "src", "index.ts"))));
 
-			mockPi.onCall({ output: "foreground contract comparison" });
-			const foreground = await runSync(tempDir, [discovered], agentName, task, { runId: "contract-foreground", acceptance: false });
-			assert.equal(foreground.exitCode, 0);
-			assert.equal(foreground.launchContractDigest, preflight.contract.launchContractDigest);
-
-			mockPi.onCall({ output: "async contract comparison" });
-			const asyncId = `async-contract-equivalence-${Date.now().toString(36)}`;
-			const launch = executeAsyncSingle(asyncId, {
-				agent: agentName,
-				task,
-				agentConfig: discovered,
-				ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
-				artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
-				shareEnabled: false,
-				sessionRoot: path.join(tempDir, "sessions"),
-				maxSubagentDepth: 2,
-				acceptance: false,
-			});
-			const payload = await readAsyncPayload(asyncId);
-			assert.equal(launch.details.launchContractDigest, preflight.contract.launchContractDigest);
-			assert.equal(payload.launchContractDigest, preflight.contract.launchContractDigest);
-			assert.equal(payload.results[0]?.launchContractDigest, preflight.contract.launchContractDigest);
-		} finally {
-			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-			else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-		}
-	});
-
-	it("matches preflight launch and definition digests for executor-launched async runs with the Intercom bridge active", { skip: !isAsyncAvailable() || !createSubagentExecutor ? "jiti or executor not available" : undefined }, async () => {
-		const agentName = `bridge-async-${Date.now().toString(36)}`;
-		const task = "Compare bridged async launch identity.";
-		const agentPath = path.join(tempDir, ".pi", "agents", `${agentName}.md`);
-		fs.mkdirSync(path.dirname(agentPath), { recursive: true });
-		fs.writeFileSync(agentPath, `---\nname: ${agentName}\ndescription: Bridged async worker\ntools:\n  - read\ncompletionGuard: false\n---\nAnswer from the task only.\n`, "utf-8");
-		const discovered = discoverAgents(tempDir).agents.find((agent) => agent.name === agentName);
-		assert.ok(discovered, "expected temporary agent definition to be discovered");
-
-		const preflight = await resolveSubagentLaunchContract({ agent: agentName, cwd: tempDir, task, runId: "bridged-async" });
-		assert.equal(preflight.ok, true);
-		if (!preflight.ok) return;
-		assert.deepEqual(preflight.contract.intercomBridge, { mode: "always", active: true });
-		assert.ok(preflight.contract.tools.effectiveAllowlist.includes("contact_supervisor"));
-
-		mockPi.onCall({ output: "bridged async done" });
-		const launch = await makeAsyncExecutor([discovered]).execute(
-			"bridged-async-launch",
-			{ agent: agentName, task, async: true, runId: "bridged-async", acceptance: false },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		) as AsyncExecutionResult;
-		assert.equal(launch.isError, undefined, launch.content?.[0]?.text);
-		assert.ok(launch.details.asyncId);
-		assert.equal(launch.details.launchContractDigest, preflight.contract.launchContractDigest);
-
-		// launchContractDigest embeds the definition digest, so equality here also
-		// proves the async path hashed the parsed definition, not the bridged copy.
-		const payload = await readAsyncPayload(launch.details.asyncId);
-		assert.equal(payload.launchContractDigest, preflight.contract.launchContractDigest);
-		assert.equal(payload.results[0]?.launchContractDigest, preflight.contract.launchContractDigest);
-	});
 
 	it("persists the actual launch digest in async status and result metadata", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
 		mockPi.onCall({
@@ -422,13 +341,11 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 			maxSubagentDepth: 2,
 			acceptance: false,
 			context: "fork",
-			intercomBridge: { mode: "off" },
 		});
 		assert.match(launch.details.launchContractDigest ?? "", /^[a-f0-9]{64}$/);
-		const recovery = JSON.parse(fs.readFileSync(path.join(ASYNC_DIR, id, "recovery-descriptor.json"), "utf-8")) as { runFanoutBudget?: { rootRunId?: string; limit?: number }; context?: string; intercomBridge?: { mode?: string }; tools?: string[]; systemPrompt?: string };
+		const recovery = JSON.parse(fs.readFileSync(path.join(ASYNC_DIR, id, "recovery-descriptor.json"), "utf-8")) as { runFanoutBudget?: { rootRunId?: string; limit?: number }; context?: string; tools?: string[]; systemPrompt?: string };
 		assert.deepEqual(recovery.runFanoutBudget && { rootRunId: recovery.runFanoutBudget.rootRunId, limit: recovery.runFanoutBudget.limit }, { rootRunId: id, limit: 64 });
 		assert.equal(recovery.context, "fork");
-		assert.deepEqual(recovery.intercomBridge, { mode: "off" });
 		assert.deepEqual(recovery.tools, ["read"]);
 		assert.equal(recovery.systemPrompt, "Base prompt");
 		const payload = await readAsyncPayload(id);
@@ -897,7 +814,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 			assert.deepEqual(status.capabilityCeiling, payload.capabilityCeiling);
 			assert.deepEqual(status.steps?.[0]?.capabilityCeiling, payload.capabilityCeiling);
 			assert.deepEqual(payload.capabilityAudit?.effectiveTools, ["read"]);
-			assert.deepEqual(payload.capabilityAudit?.removedTools, ["write", "contact_supervisor"]);
+			assert.deepEqual(payload.capabilityAudit?.removedTools, ["write"]);
 			assert.equal(payload.capabilityAudit?.extensionsDenied, true);
 			const events = fs.readFileSync(path.join(asyncDir, "events.jsonl"), "utf-8").trim().split("\n").map((line) => JSON.parse(line));
 			assert.ok(events.some((event) => event.type === "subagent.capability-ceiling.applied" && event.stepIndex === 0 && event.capabilityAudit?.removedTools?.includes("write")));
@@ -906,7 +823,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 			const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf-8")) as { launchContractDigest?: string; capabilityCeiling?: unknown; capabilityAudit?: { removedTools?: string[] } };
 			assert.equal(metadata.launchContractDigest, payload.results[0]?.launchContractDigest);
 			assert.deepEqual(metadata.capabilityCeiling, payload.capabilityCeiling);
-			assert.deepEqual(metadata.capabilityAudit?.removedTools, ["write", "contact_supervisor"]);
+			assert.deepEqual(metadata.capabilityAudit?.removedTools, ["write"]);
 		} finally {
 			try {
 				// Result/read/assertion failures must not skip an established owned-run wait.

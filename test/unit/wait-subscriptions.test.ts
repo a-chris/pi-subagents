@@ -259,7 +259,7 @@ describe("non-blocking wait subscriptions", () => {
 		}
 	});
 
-	it("tells the parent to reply and wait for an intercom-detached failed async run", () => {
+	it("revives a failed async run whose step detached", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-wait-subscribe-intercom-detach-"));
 		const asyncRoot = path.join(root, "runs");
 		const subscriptionsDir = path.join(root, "subscriptions");
@@ -275,18 +275,18 @@ describe("non-blocking wait subscriptions", () => {
 			writeStatus(asyncRoot, "run-detached", "running", { sessionId: "session-a", pid: 999_999 });
 			manager.arm({ targetKind: "async", runId: "run-detached", requestedId: "run-detached", timeoutMs: 30_000 });
 
+			writeRecoveryDescriptor(asyncRoot, "run-detached", "worker", sessionFile, root);
 			writeStatus(asyncRoot, "run-detached", "failed", {
 				sessionId: "session-a",
 				error: "Step failed: worker",
-				steps: [{ agent: "worker", status: "failed", sessionFile, error: "Detached for intercom coordination before task completion." }],
+				steps: [{ agent: "worker", status: "failed", sessionFile, error: "Process exited with code 1." }],
 			});
 			manager.reconcile();
 
 			const message = sent[0] ?? "";
-			assert.match(message, /Reply to the supervisor request first/);
-			assert.match(message, /wait with bg_wait/);
-			assert.match(message, /do not resume or launch a replacement/);
-			assert.doesNotMatch(message, /Resume-first/);
+			assert.match(message, /Resume-first: failed run "run-detached"/);
+			assert.match(message, /subagent\(\{ action: "resume"/);
+			assert.match(message, /before reporting failure or launching a replacement/);
 		} finally {
 			manager.dispose();
 			fs.rmSync(root, { recursive: true, force: true });

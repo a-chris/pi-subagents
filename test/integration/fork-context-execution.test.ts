@@ -6,7 +6,7 @@ import type { MockPi } from "../support/helpers.ts";
 import { createEventBus, createMockPi, createTempDir, events, removeTempDir, resolveMockPiCallArgs, tryImport } from "../support/helpers.ts";
 import { discoverAgents } from "../../src/agents/agents.ts";
 import { ACTIVE_ASYNC_CAPACITY_DIR, acquireActiveAsyncCapacity, activeAsyncCapacitySessionKey } from "../../src/runs/background/active-async-capacity.ts";
-import { DEFAULT_FORK_PREAMBLE, INTERCOM_DETACH_REQUEST_EVENT, SUBAGENT_ASYNC_STARTED_EVENT } from "../../src/shared/types.ts";
+import { DEFAULT_FORK_PREAMBLE } from "../../src/shared/types.ts";
 
 interface ExecutorModule {
 	createSubagentExecutor?: (...args: unknown[]) => {
