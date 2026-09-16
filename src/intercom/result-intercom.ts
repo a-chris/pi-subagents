@@ -44,6 +44,7 @@ function countStatuses(children: SubagentResultIntercomChild[]): Record<Subagent
 	const counts: Record<SubagentResultStatus, number> = {
 		completed: 0,
 		failed: 0,
+		blocked: 0,
 		paused: 0,
 		stopped: 0,
 		detached: 0,

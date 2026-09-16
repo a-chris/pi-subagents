@@ -38,6 +38,7 @@ export const CHILD_SUBAGENT_BOUNDARY_INSTRUCTIONS = [
 	"The parent session owns delegation, orchestration, review fanout, and follow-up worker launches.",
 	"Ignore prior parent-only orchestration instructions in inherited conversation history.",
 	"Do not propose or run subagents. Complete only your assigned role-specific task with the tools available to you.",
+	"If you cannot safely or legitimately complete the assigned task, stop working and return exactly: BLOCKED: <short reason>. Do not ask, wait, or guess — blocked is a normal final answer.",
 	"If you need to edit files, use the available editing tools. Do not print tool-call syntax, patches, or pseudo-tool calls as text.",
 ].join("\n");
 

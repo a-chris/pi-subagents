@@ -1,10 +1,11 @@
 import type { AgentContract, EffectsProjection, ExecutionProjection, ReviewProjection, SingleResult } from "../../shared/types.ts";
+import { parseBlockedReason } from "./blocked-result.ts";
 
 export function isAgentContract(contract: AgentContract | undefined): boolean {
 	return contract?.version === 1;
 }
 
-export function buildExecutionProjection(result: Pick<SingleResult, "exitCode" | "error" | "interrupted" | "timedOut" | "stopped" | "detached">): ExecutionProjection {
+export function buildExecutionProjection(result: Pick<SingleResult, "exitCode" | "error" | "interrupted" | "timedOut" | "stopped" | "detached" | "finalOutput">): ExecutionProjection {
 	if (result.detached) {
 		return { status: "detached", success: false, exitCode: result.exitCode, detached: true, ...(result.error ? { error: result.error } : {}) };
 	}
@@ -13,6 +14,16 @@ export function buildExecutionProjection(result: Pick<SingleResult, "exitCode" |
 	}
 	if (result.interrupted) {
 		return { status: "paused", success: false, exitCode: result.exitCode, interrupted: true, ...(result.error ? { error: result.error } : {}) };
+	}
+	const blockedReason = !result.timedOut ? parseBlockedReason(result.finalOutput) : undefined;
+	if (blockedReason) {
+		return {
+			status: "blocked",
+			success: false,
+			exitCode: result.exitCode,
+			blocked: true,
+			error: result.error ?? `Blocked: ${blockedReason}`,
+		};
 	}
 	const success = result.exitCode === 0 && !result.error && !result.timedOut;
 	return {

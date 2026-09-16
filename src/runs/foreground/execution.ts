@@ -8,6 +8,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { discoverAgents, formatUnknownAgentError, unknownAgentDiagnosticContext, type AgentConfig } from "../../agents/agents.ts";
 import { alignForkedSessionCwd } from "../../shared/fork-session-cwd.ts";
 import { buildEffectiveSystemPrompt } from "../shared/effective-system-prompt.ts";
+import { parseBlockedReason } from "../shared/blocked-result.ts";
 import {
 	ensureArtifactsDir,
 	formatOutputArtifactContent,
@@ -2084,6 +2085,10 @@ async function runSyncCompletionInner(
 		}
 	}
 	if (isAgentContract(options.agentContract)) attachContractProjections(result);
+	if (!result.blocked && !result.timedOut && !result.stopped && !result.interrupted) {
+		const reason = parseBlockedReason(result.finalOutput);
+		if (reason) result.blocked = reason;
+	}
 	redactResultPrompt(result);
 	try {
 		persistResultMetadata(result);

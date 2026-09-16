@@ -136,6 +136,7 @@ import { assertThinkingWithinCeiling } from "../../shared/thinking-ceiling.ts";
 import { resolveLaunchBinding } from "../../shared/launch-contract.ts";
 import { writeInitialProgressFile } from "../../shared/settings.ts";
 import { resolveSubagentIntercomTarget } from "../../intercom/intercom-bridge.ts";
+import { parseBlockedReason } from "../shared/blocked-result.ts";
 import { acceptanceFailureMessage, aggregateAcceptanceReport, buildSkippedAcceptanceLedger, captureStagedIndexBaseline, evaluateAcceptance, formatAcceptancePrompt, resolveAcceptanceReportMode, resolveEffectiveAcceptance, stripAcceptanceReport } from "../shared/acceptance.ts";
 import { attachContractProjections, isAgentContract } from "../shared/agent-contract.ts";
 import { waitForImportedAsyncRoot } from "./chain-root-attachment.ts";
@@ -277,6 +278,8 @@ interface StepResult {
 	transcriptError?: string;
 	agentContract?: import("../../shared/types.ts").AgentContract;
 	launchContractDigest?: string;
+	/** Fail-closed completion reason parsed from the child's final output. */
+	blocked?: string;
 	execution?: import("../../shared/types.ts").ExecutionProjection;
 	review?: import("../../shared/types.ts").ReviewProjection;
 	effects?: import("../../shared/types.ts").EffectsProjection;
@@ -1525,6 +1528,7 @@ export async function runSingleStepInner(
 	const acceptanceCanFailRun = acceptanceFailure && effectiveAcceptance?.explicit && (finalResult?.exitCode ?? 1) === 0 && !finalResult?.interrupted && !timedOutAfterAcceptance && !stoppedAfterAcceptance && !isAgentContract(step.agentContract);
 	const effectiveFinalExitCode = timedOutAfterAcceptance || stoppedAfterAcceptance ? 1 : acceptanceCanFailRun ? 1 : finalResult?.exitCode ?? 1;
 	const intercomDetachReceipt = finalResult?.finalOutput === INTERCOM_DETACH_RECEIPT;
+	const blockedReason = !stoppedAfterAcceptance && !timedOutAfterAcceptance ? parseBlockedReason(finalResult?.finalOutput) : undefined;
 	const baseFinalError = stoppedAfterAcceptance
 		? ctx.stopMessage ?? "Subagent stopped by user."
 		: timedOutAfterAcceptance
@@ -1583,6 +1587,7 @@ export async function runSingleStepInner(
 		outputState,
 		exitCode: effectiveFinalExitCode,
 		error: effectiveFinalError,
+		blocked: blockedReason,
 		sessionFile: step.sessionFile,
 		intercomTarget: ctx.childIntercomTarget,
 		model: finalResult?.model,
@@ -2205,9 +2210,9 @@ export async function runSubagent(
 	const refreshWorkflowGraph = (): void => {
 		if (!config.workflowGraph) return;
 		const graph = structuredClone(statusPayload.workflowGraph ?? config.workflowGraph);
-		const normalize = (status: RunnerStatusStep["status"]): "pending" | "running" | "completed" | "failed" | "paused" | "stopped" | "detached" | "rejected" => {
+		const normalize = (status: RunnerStatusStep["status"]): "pending" | "running" | "completed" | "failed" | "paused" | "stopped" | "detached" | "rejected" | "blocked" => {
 			if (status === "complete" || status === "completed") return "completed";
-			if (status === "running" || status === "failed" || status === "paused" || status === "stopped" || status === "pending" || status === "rejected") return status;
+			if (status === "running" || status === "failed" || status === "paused" || status === "stopped" || status === "pending" || status === "rejected" || status === "blocked") return status;
 			return "pending";
 		};
 		const updateNode = (node: NonNullable<typeof graph.nodes>[number]): void => {
@@ -3811,7 +3816,7 @@ export async function runSubagent(
 				const taskEndTime = Date.now();
 				const childInterrupted = singleResult.interrupted === true;
 				const childStopped = singleResult.stopped === true;
-				requiredStatusStep(statusPayload, fi).status = stopped || childStopped ? "stopped" : timedOut ? "failed" : childInterrupted ? "paused" : singleResult.execution?.status === "partial" ? "partial" : singleResult.exitCode === 0 ? "complete" : "failed";
+				requiredStatusStep(statusPayload, fi).status = stopped || childStopped ? "stopped" : timedOut ? "failed" : childInterrupted ? "paused" : singleResult.execution?.status === "partial" ? "partial" : singleResult.blocked ? "blocked" : singleResult.exitCode === 0 ? "complete" : "failed";
 				requiredStatusStep(statusPayload, fi).endedAt = taskEndTime;
 				requiredStatusStep(statusPayload, fi).durationMs = taskEndTime - taskStartTime;
 				requiredStatusStep(statusPayload, fi).exitCode = stopped || childStopped ? 1 : timedOut ? 1 : childInterrupted ? 0 : singleResult.exitCode;
@@ -4231,7 +4236,7 @@ export async function runSubagent(
 						const childInterrupted = singleResult.interrupted === true;
 						const childStopped = singleResult.stopped === true;
 
-						requiredStatusStep(statusPayload, fi).status = stopped || childStopped ? "stopped" : timedOut ? "failed" : childInterrupted ? "paused" : singleResult.execution?.status === "partial" ? "partial" : singleResult.exitCode === 0 ? "complete" : "failed";
+						requiredStatusStep(statusPayload, fi).status = stopped || childStopped ? "stopped" : timedOut ? "failed" : childInterrupted ? "paused" : singleResult.execution?.status === "partial" ? "partial" : singleResult.blocked ? "blocked" : singleResult.exitCode === 0 ? "complete" : "failed";
 						requiredStatusStep(statusPayload, fi).endedAt = taskEndTime;
 						requiredStatusStep(statusPayload, fi).durationMs = taskDuration;
 						requiredStatusStep(statusPayload, fi).exitCode = stopped || childStopped ? 1 : timedOut ? 1 : childInterrupted ? 0 : singleResult.exitCode;
@@ -4724,7 +4729,7 @@ export async function runSubagent(
 
 			const stepEndTime = Date.now();
 			const childInterrupted = singleResult.interrupted === true;
-			requiredStatusStep(statusPayload, flatIndex).status = stopped || childStopped ? "stopped" : timedOut ? "failed" : childInterrupted ? "paused" : singleResult.execution?.status === "partial" ? "partial" : singleResult.exitCode === 0 ? "complete" : "failed";
+			requiredStatusStep(statusPayload, flatIndex).status = stopped || childStopped ? "stopped" : timedOut ? "failed" : childInterrupted ? "paused" : singleResult.execution?.status === "partial" ? "partial" : singleResult.blocked ? "blocked" : singleResult.exitCode === 0 ? "complete" : "failed";
 			requiredStatusStep(statusPayload, flatIndex).endedAt = stepEndTime;
 			requiredStatusStep(statusPayload, flatIndex).durationMs = stepEndTime - stepStartTime;
 			requiredStatusStep(statusPayload, flatIndex).exitCode = stopped || childStopped ? 1 : timedOut ? 1 : childInterrupted ? 0 : singleResult.exitCode;

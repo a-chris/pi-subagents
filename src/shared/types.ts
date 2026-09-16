@@ -42,7 +42,7 @@ export interface ChainOutputMapEntry {
 
 export type ChainOutputMap = Record<string, ChainOutputMapEntry>;
 
-export type WorkflowNodeStatus = "pending" | "running" | "completed" | "failed" | "partial" | "paused" | "stopped" | "detached" | "rejected";
+export type WorkflowNodeStatus = "pending" | "running" | "completed" | "failed" | "partial" | "paused" | "stopped" | "detached" | "rejected" | "blocked";
 
 export type HostStepMonitorKind = "command" | "ci" | "gate";
 export type HostStepState = "pending" | "running" | "done" | "cancelled" | "error";
@@ -397,7 +397,7 @@ export interface ControlEvent {
 	taskPreview?: string;
 }
 
-export type SubagentResultStatus = "completed" | "failed" | "paused" | "stopped" | "detached";
+export type SubagentResultStatus = "completed" | "failed" | "paused" | "stopped" | "detached" | "blocked";
 export type SubagentOutputState = "present" | "absent" | "unknown";
 export type SubagentRunMode = "single" | "parallel" | "chain" | "workflow";
 export type SubagentResultMode = SubagentRunMode;
@@ -536,7 +536,7 @@ export interface AgentContract {
 
 export type ChainGateLayer = "execution" | "acceptance";
 
-export type ExecutionProjectionStatus = "completed" | "failed" | "partial" | "paused" | "stopped" | "detached";
+export type ExecutionProjectionStatus = "completed" | "failed" | "partial" | "paused" | "stopped" | "detached" | "blocked";
 
 export interface ExecutionProjection {
 	status: ExecutionProjectionStatus;
@@ -547,6 +547,8 @@ export interface ExecutionProjection {
 	timedOut?: boolean;
 	stopped?: boolean;
 	detached?: boolean;
+	/** Fail-closed completion: the child stopped instead of completing the task. */
+	blocked?: boolean;
 }
 
 export interface ReviewProjection {
@@ -1280,6 +1282,13 @@ export interface SingleResult {
 	 * a signal to reduce input size or re-decompose the task.
 	 */
 	contextOverflow?: boolean;
+	/**
+	 * Fail-closed completion: the child stopped because it could not safely or
+	 * legitimately complete the task. The reason is the parsed BLOCKED: marker
+	 * from the child's final output. Terminal status, not an error channel: the
+	 * parent owns the follow-up (re-plan, re-run, or report to the operator).
+	 */
+	blocked?: string;
 	sessionFile?: string;
 	skills?: string[];
 	skillsWarning?: string;
@@ -1576,7 +1585,7 @@ export interface NestedStepSummary {
 	agent: string;
 	/** Human-readable display name for the child session, when derived at launch. */
 	sessionName?: string;
-	status: "pending" | "running" | "complete" | "completed" | "failed" | "partial" | "paused" | "stopped" | "rejected";
+	status: "pending" | "running" | "complete" | "completed" | "failed" | "partial" | "paused" | "stopped" | "rejected" | "blocked";
 	model?: string;
 	thinking?: string;
 	sessionFile?: string;
@@ -1931,7 +1940,7 @@ export interface AsyncStatus {
 		parentWorkflowRunId?: string;
 		outputName?: string;
 		structured?: boolean;
-		status: "pending" | "running" | "complete" | "completed" | "failed" | "partial" | "paused" | "stopped" | "rejected";
+		status: "pending" | "running" | "complete" | "completed" | "failed" | "partial" | "paused" | "stopped" | "rejected" | "blocked";
 		stopRequested?: boolean;
 		stopRequestedAt?: number;
 		children?: NestedRunSummary[];
