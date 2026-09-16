@@ -1,9 +1,7 @@
 import {
 	type SubagentDelegationRequest,
 } from "../api/delegation.ts";
-import { validateIntercomBridgeConfig } from "../intercom/intercom-bridge.ts";
 import { validateToolBudgetConfig } from "../runs/shared/tool-budget.ts";
-import type { IntercomBridgeConfig } from "../shared/types.ts";
 import { cloneJsonWithinByteLimit } from "./delegation-json.ts";
 
 export type SubagentDelegationParseResult =
@@ -100,15 +98,6 @@ export function parseSubagentDelegationRequest(data: unknown): SubagentDelegatio
 	if (value.artifacts !== undefined && typeof value.artifacts !== "boolean") {
 		return { ok: false, ...identity, error: "artifacts must be a boolean." };
 	}
-	let intercomBridge: IntercomBridgeConfig | undefined;
-	if (value.intercomBridge !== undefined) {
-		const bridge = validateIntercomBridgeConfig({ value: value.intercomBridge, label: "intercomBridge" });
-		if (!bridge.ok) return { ok: false, ...identity, error: bridge.error };
-		if (typeof bridge.value.instructionFile === "string" && Buffer.byteLength(bridge.value.instructionFile, "utf8") > MAX_SHORT_TEXT_BYTES) {
-			return { ok: false, ...identity, error: "intercomBridge.instructionFile exceeds 1 KiB when UTF-8 encoded." };
-		}
-		intercomBridge = bridge.value;
-	}
 	if (Buffer.byteLength(value.task as string, "utf8") > MAX_TASK_BYTES) {
 		return { ok: false, ...identity, error: "Delegation task exceeds 1 MiB when UTF-8 encoded." };
 	}
@@ -167,7 +156,6 @@ export function parseSubagentDelegationRequest(data: unknown): SubagentDelegatio
 		request: {
 			...value,
 			// The validated copy replaces the caller's object so the request never aliases untrusted input.
-			...(intercomBridge ? { intercomBridge } : {}),
 			result: structuredSchema
 				? { kind: "structured", schema: structuredSchema }
 				: { kind: "text" },

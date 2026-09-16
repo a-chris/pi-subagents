@@ -16,7 +16,6 @@ import { parallelHandoffPath, resolveRetainedWorktreeCwd } from "../shared/paral
 import { normalizeWorktreeBaseRef } from "../shared/worktree.ts";
 import { intersectThinkingCeilings, parseThinkingLevel, type ThinkingLevel } from "../../shared/thinking-ceiling.ts";
 import { assertWorkflowGraphHostSteps } from "../shared/host-step-status.ts";
-import { validateIntercomBridgeConfig } from "../../intercom/intercom-bridge.ts";
 import { validateModelResponseAliases } from "../../shared/model-response-aliases.ts";
 
 export interface AsyncResumeParams {
@@ -323,7 +322,7 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 		"modelResponseAliases", "version", "launchContractDigest", "sourceRunId", "agentContract", "agent", "sessionFile", "cwd", "model", "modelProvider", "modelOverrideFromParent", "modelOrigin", "fast", "thinking", "thinkingCeiling", "tools", "allowNestedSubagents", "extensions",
 		"subagentOnlyExtensions", "mcpDirectTools", "excludeTools", "mutationTools", "systemPrompt", "systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "skills",
 		"skillPath", "agentFilePath", "completionGuard", "memory", "outputPath", "outputMode", "structuredOutputSchema", "acceptance", "sessionDir", "artifactConfig",
-		"artifactsDir", "maxOutput", "controlConfig", "context", "intercomBridge", "absoluteDeadlineAt", "initialTurnBudget", "initialToolBudget", "maxSubagentDepth", "share", "capabilityCeiling",
+		"artifactsDir", "maxOutput", "controlConfig", "context", "absoluteDeadlineAt", "initialTurnBudget", "initialToolBudget", "maxSubagentDepth", "share", "capabilityCeiling",
 		"launchResolvedExtensions", "runFanoutBudget", "lane", "baseRef",
 		"extensionBindings",
 		"requiredExtensions",
@@ -417,10 +416,6 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 		}
 		if (artifact.includeTranscript !== undefined && typeof artifact.includeTranscript !== "boolean") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': artifactConfig.includeTranscript must be a boolean.`);
 		if (!Number.isInteger(artifact.cleanupDays) || (artifact.cleanupDays as number) < 0) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': artifactConfig.cleanupDays must be a non-negative integer.`);
-	}
-	if (parsed.intercomBridge !== undefined) {
-		const bridge = validateIntercomBridgeConfig({ value: parsed.intercomBridge, label: "intercomBridge" });
-		if (!bridge.ok) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': ${bridge.error}`);
 	}
 	if (parsed.controlConfig !== undefined) {
 		if (!parsed.controlConfig || typeof parsed.controlConfig !== "object" || Array.isArray(parsed.controlConfig)) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': controlConfig must be an object.`);

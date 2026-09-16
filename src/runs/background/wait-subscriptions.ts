@@ -8,12 +8,9 @@ import { readCompletionReplay } from "./completion-replay.ts";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import {
 	DIRS,
-	INTERCOM_DETACH_REQUEST_EVENT,
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	SUBAGENT_CONTROL_EVENT,
-	SUBAGENT_CONTROL_INTERCOM_EVENT,
 	SUBAGENT_FOREGROUND_COMPLETE_EVENT,
-	SUBAGENT_RESULT_INTERCOM_EVENT,
 	type SubagentState,
 	type WaitCompletion,
 	type WaitSubscriptionRecord,
@@ -277,12 +274,9 @@ export function createWaitSubscriptionManager(
 	};
 
 	const wakeChannels = [
-		INTERCOM_DETACH_REQUEST_EVENT,
 		SUBAGENT_ASYNC_COMPLETE_EVENT,
 		SUBAGENT_FOREGROUND_COMPLETE_EVENT,
 		SUBAGENT_CONTROL_EVENT,
-		SUBAGENT_CONTROL_INTERCOM_EVENT,
-		SUBAGENT_RESULT_INTERCOM_EVENT,
 	];
 	const unsubscribes = wakeChannels.map((channel) => pi.events.on(channel, reconcile));
 

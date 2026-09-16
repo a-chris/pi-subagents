@@ -8,7 +8,6 @@ import { discoverAgentsAll } from "../../src/agents/agents.ts";
 import { handleCreate } from "../../src/agents/agent-management.ts";
 import { clearSkillCache, discoverAvailableSkills, resolveSkillPath } from "../../src/agents/skills.ts";
 import { loadConfig, updateConfig } from "../../src/extension/config.ts";
-import { diagnoseIntercomBridge, resolveIntercomBridge } from "../../src/intercom/intercom-bridge.ts";
 import { loadRunsForAgent, recordRun } from "../../src/runs/shared/run-history.ts";
 import { cleanupAllArtifactDirs, getArtifactsDir, getProjectArtifactsDir } from "../../src/shared/artifacts.ts";
 import { TEMP_ARTIFACTS_DIR } from "../../src/shared/types.ts";
@@ -457,25 +456,4 @@ Package skill content.
 		assert.equal(loadRunsForAgent("env-agent").length, 3);
 	});
 
-	it("uses the configured agent dir for subagent bridge instruction files", () => {
-		const instructionPath = path.join(agentDir, "extensions", "subagent", "bridge.md");
-		writeFile(instructionPath, "Native bridge for {orchestratorTarget}");
-
-		const diagnostic = diagnoseIntercomBridge({
-			config: { mode: "always" },
-			context: "fresh",
-			orchestratorTarget: "main",
-		});
-		assert.equal(diagnostic.active, true);
-		assert.equal(diagnostic.extensionDir, "native:pi-subagents-supervisor-channel");
-
-		const bridge = resolveIntercomBridge({
-			config: { mode: "always", instructionFile: "bridge.md" },
-			context: "fresh",
-			orchestratorTarget: "main",
-		});
-		assert.equal(bridge.active, true);
-		assert.equal(bridge.extensionDir, "native:pi-subagents-supervisor-channel");
-		assert.match(bridge.instruction, /Native bridge for main/);
-	});
 });

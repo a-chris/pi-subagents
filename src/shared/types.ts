@@ -318,7 +318,7 @@ export interface TokenUsage {
 
 export type ActivityState = "active_long_running" | "needs_attention";
 export type ControlEventType = "active_long_running" | "needs_attention";
-export type ControlNotificationChannel = "event" | "async" | "intercom";
+export type ControlNotificationChannel = "event" | "async";
 
 export interface ControlConfig {
 	enabled?: boolean;
@@ -381,7 +381,7 @@ export interface ControlEvent {
 	nestedRunId?: string;
 	nestingPath?: NestedRunAddress["path"];
 	message: string;
-	reason?: "idle" | "completion_guard" | "active_long_running" | "tool_failures" | "supervisor_request" | "time_threshold" | "turn_threshold" | "token_threshold" | "tool_open_threshold";
+	reason?: "idle" | "completion_guard" | "active_long_running" | "tool_failures" | "time_threshold" | "turn_threshold" | "token_threshold" | "tool_open_threshold";
 	turns?: number;
 	tokens?: number;
 	toolCount?: number;
@@ -850,8 +850,6 @@ export interface SteeringRecoveryDescriptor {
 	controlConfig?: ResolvedControlConfig;
 	/** Resolved launch context for this async child. */
 	context?: "fresh" | "fork";
-	/** Raw per-run bridge override. Omitted descriptors continue to use global config. */
-	intercomBridge?: IntercomBridgeConfig;
 	lane?: WorkflowLaneMetadata;
 	absoluteDeadlineAt?: number;
 	initialToolBudget?: ResolvedToolBudget;
@@ -880,47 +878,11 @@ export type CostSummary = {
 
 export type PublicNestedRunSummary = Pick<
 	NestedRunSummary,
-	"id" | "parentRunId" | "parentStepIndex" | "parentAgent" | "depth" | "path" | "asyncDir" | "sessionId" | "sessionFile" | "intercomTarget" | "ownerIntercomTarget" | "leafIntercomTarget" | "ownerState" | "mode" | "state" | "agent" | "sessionName" | "agents" | "model" | "thinking" | "currentStep" | "chainStepCount" | "parallelGroups" | "activityState" | "lastActivityAt" | "currentTool" | "currentToolStartedAt" | "currentPath" | "turnCount" | "toolCount" | "toolBudget" | "toolBudgetBlocked" | "totalTokens" | "totalCost" | "startedAt" | "endedAt" | "lastUpdate" | "error" | "timeoutMs" | "deadlineAt" | "timedOut" | "stopped" | "turnBudget" | "turnBudgetExceeded" | "wrapUpRequested"
+	"id" | "parentRunId" | "parentStepIndex" | "parentAgent" | "depth" | "path" | "asyncDir" | "sessionId" | "sessionFile" | "ownerState" | "mode" | "state" | "agent" | "sessionName" | "agents" | "model" | "thinking" | "currentStep" | "chainStepCount" | "parallelGroups" | "activityState" | "lastActivityAt" | "currentTool" | "currentToolStartedAt" | "currentPath" | "turnCount" | "toolCount" | "toolBudget" | "toolBudgetBlocked" | "totalTokens" | "totalCost" | "startedAt" | "endedAt" | "lastUpdate" | "error" | "timeoutMs" | "deadlineAt" | "timedOut" | "stopped" | "turnBudget" | "turnBudgetExceeded" | "wrapUpRequested"
 > & {
 	steps?: PublicNestedStepSummary[];
 	children?: PublicNestedRunSummary[];
 };
-
-export interface SubagentResultIntercomChild {
-	agent: string;
-	/** Human-readable display name for the child session, when derived at launch. */
-	sessionName?: string;
-	/** Process/lifecycle status. It does not establish semantic task completion. */
-	status: SubagentResultStatus;
-	/** Whether the child produced substantive output before its process ended. */
-	outputState?: SubagentOutputState;
-	summary: string;
-	index?: number;
-	artifactPath?: string;
-	sessionPath?: string;
-	intercomTarget?: string;
-	children?: PublicNestedRunSummary[];
-}
-
-export interface SubagentResultIntercomPayload {
-	to: string;
-	message: string;
-	requestId?: string;
-	runId: string;
-	mode: SubagentRunMode;
-	status: SubagentResultStatus;
-	summary: string;
-	source: "foreground" | "async";
-	children: SubagentResultIntercomChild[];
-	asyncId?: string;
-	asyncDir?: string;
-	chainSteps?: number;
-	agent?: string;
-	index?: number;
-	artifactPath?: string;
-	sessionPath?: string;
-	parallelHandoff?: ParallelHandoffReference;
-}
 
 // ============================================================================
 // Progress Tracking
@@ -1427,12 +1389,6 @@ export interface Details {
 		timedOut: true;
 		activeRunIds: string[];
 		activeProviderItems: Array<{ provider: string; id: string }>;
-	} | {
-		/** Non-terminal internal auto-drain yield; tracked work remains active. */
-		reason: "supervisor_request";
-		timedOut: false;
-		activeRunIds: string[];
-		activeProviderItems: Array<{ provider: string; id: string }>;
 	};
 	controlEvents?: ControlEvent[];
 	steering?: SteerActionResult;
@@ -1622,9 +1578,6 @@ export interface NestedRunSummary extends NestedRunAddress {
 	pid?: number;
 	sessionId?: string;
 	sessionFile?: string;
-	intercomTarget?: string;
-	ownerIntercomTarget?: string;
-	leafIntercomTarget?: string;
 	ownerState?: NestedOwnerState;
 	controlInbox?: string;
 	capabilityToken?: string;
@@ -2254,8 +2207,6 @@ export interface ActiveAsyncCapacitySnapshot {
 export interface SubagentState {
 	baseCwd: string;
 	currentSessionId: string | null;
-	/** Exact SDK runtime session ID for supervisor ownership; never a session file path. */
-	supervisorOwnerSessionId?: string | null;
 	/** Session for which active status projections were restored successfully. */
 	statusProjectionSessionId?: string | null;
 	/** Reload-stable identity for this parent Pi process/window. */
@@ -2356,23 +2307,13 @@ export interface ErrorInfo {
 	details?: string;
 }
 
-export interface IntercomEventBus {
-	on(channel: string, handler: (data: unknown) => void): () => void;
-	emit(channel: string, data: unknown): void;
-}
-
-export const INTERCOM_DETACH_REQUEST_EVENT = "pi-intercom:detach-request";
-export const INTERCOM_DETACH_RESPONSE_EVENT = "pi-intercom:detach-response";
 export const SUBAGENT_ASYNC_STARTED_EVENT = "subagent:async-started";
 export const SUBAGENT_ASYNC_COMPLETE_EVENT = "subagent:async-complete";
 export const SUBAGENT_PROCESS_TERMINAL_EVENT = "subagent:process-terminal";
 export const SUBAGENT_FOREGROUND_COMPLETE_EVENT = "subagent:foreground-complete";
 export const SUBAGENT_CONTROL_EVENT = "subagent:control-event";
-export const SUBAGENT_CONTROL_INTERCOM_EVENT = "subagent:control-intercom";
 export const SUBAGENT_STEERING_NOTICE_EVENT = "subagent:steering-notice";
 export const SUBAGENT_CHILD_STATUS_EVENT = "subagent:child-status";
-export const SUBAGENT_RESULT_INTERCOM_EVENT = "subagent:result-intercom";
-export const SUBAGENT_RESULT_INTERCOM_DELIVERY_EVENT = "subagent:result-intercom-delivery";
 
 export interface SubagentChildStatusEvent {
 	type: "subagent.child-status";
@@ -2437,8 +2378,6 @@ export interface RunSyncOptions {
 	usageBudget?: UsageBudgetConfig;
 	toolBudget?: ResolvedToolBudget;
 	allowZeroToolBudget?: boolean;
-	allowIntercomDetach?: boolean;
-	intercomEvents?: IntercomEventBus;
 	onUpdate?: (r: import("@earendil-works/pi-agent-core").AgentToolResult<Details>) => void;
 	/** Internal structured-delegation transport optimization: skip unchanged live snapshots. */
 	suppressUnchangedDelegationUpdates?: boolean;
@@ -2450,8 +2389,6 @@ export interface RunSyncOptions {
 	/** Authoritative terminal result, emitted only after the full detached run finalizes. */
 	onDetachedExit?: (result: SingleResult) => void | Promise<void>;
 	controlConfig?: ResolvedControlConfig;
-	intercomSessionName?: string;
-	orchestratorIntercomTarget?: string;
 	maxOutput?: MaxOutputConfig;
 	artifactsDir?: string;
 	artifactConfig?: ArtifactConfig;
@@ -2520,15 +2457,6 @@ export interface RunSyncOptions {
 	onEffectivePrompt?: (prompt: string) => void;
 	/** Internal lifecycle hook for the observer shared across retries of one logical child. */
 	onOrcaProgressTabCreated?: (tab: import("../runs/shared/orca-progress-tabs.ts").OrcaProgressTab) => void;
-}
-
-export type IntercomBridgeMode = "off" | "fork-only" | "always";
-
-export interface IntercomBridgeConfig {
-	mode?: IntercomBridgeMode;
-	instructionFile?: string;
-	/** Deliver grouped completion messages through an external acknowledged intercom listener. */
-	resultDelivery?: boolean;
 }
 
 interface TopLevelParallelConfig {
@@ -2692,7 +2620,6 @@ export interface ExtensionConfig {
 	artifactDir?: ArtifactDirPreference;
 	/** Artifact cleanup retention. Set cleanupDays to 0 to disable cleanup. */
 	artifactConfig?: Pick<ArtifactConfig, "cleanupDays">;
-	intercomBridge?: IntercomBridgeConfig;
 	/** Control how slow result-index scans are logged. Defaults to \"activity\".
 	 *  - \"all\": log every slow scan, including scans that find nothing.
 	 *  - \"activity\": log only slow scans that found or scheduled work. Silences

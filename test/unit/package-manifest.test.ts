@@ -125,7 +125,6 @@ test("published extension APIs use supported package entrypoints", async () => {
 		"./delegation": "./src/api/delegation.ts",
 		"./preflight": "./src/api/preflight.ts",
 		"./control-channel": "./src/api/control-channel.ts",
-		"./intercom-bridge": "./src/api/intercom-bridge.ts",
 		"./child-tool-plan": "./src/api/child-tool-plan.ts",
 		"./shared-types": "./src/api/shared-types.ts",
 		"./project-panes": "./src/api/project-panes.ts",
@@ -160,8 +159,6 @@ test("published extension APIs use supported package entrypoints", async () => {
 	assert.equal(typeof preflight.resolveSubagentLaunchContract, "function");
 	const controlChannel = await import("pi-subagents/control-channel");
 	assert.equal(typeof controlChannel.requestAsyncStop, "function");
-	const intercomBridge = await import("pi-subagents/intercom-bridge");
-	assert.equal(typeof intercomBridge.resolveIntercomSessionTarget, "function");
 	const childToolPlan = await import("pi-subagents/child-tool-plan");
 	assert.equal(typeof childToolPlan.resolvePiLaunchToolPlan, "function");
 	assert.deepEqual(Object.keys(childToolPlan).sort(), ["resolvePiLaunchToolPlan"]);

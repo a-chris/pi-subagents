@@ -9,7 +9,7 @@
  * Toggle: async parameter (default: true; set asyncByDefault:false in config.json to opt out)
  *
  * Config file: ~/.pi/agent/extensions/subagent/config.json
- *   { "asyncByDefault": true, "defaultSubagentContext": "fork", "forkContext": { "mode": "pruned", "model": "provider/model" }, "forceTopLevelAsync": true, "maxSubagentDepth": 1, "intercomBridge": { "mode": "always", "instructionFile": "./intercom-bridge.md" }, "worktreeSetupHook": "./scripts/setup-worktree.mjs" }
+ *   { "asyncByDefault": true, "defaultSubagentContext": "fork", "forkContext": { "mode": "pruned", "model": "provider/model" }, "forceTopLevelAsync": true, "maxSubagentDepth": 1, "worktreeSetupHook": "./scripts/setup-worktree.mjs" }
  */
 
 import { randomUUID } from "node:crypto";
@@ -47,14 +47,6 @@ import { registerSlashCommands } from "../slash/slash-commands.ts";
 import { registerPromptTemplateDelegationBridge } from "../slash/prompt-template-bridge.ts";
 import { registerMainWatchdog } from "../watchdog/register-main.ts";
 import { registerSlashSubagentBridge } from "../slash/slash-bridge.ts";
-import { createNativeSupervisorChannel } from "../intercom/native-supervisor-channel.ts";
-import {
-	renderSupervisorReply,
-	renderSupervisorRequest,
-	SUPERVISOR_REPLY_ENTRY_TYPE,
-	SUPERVISOR_REQUEST_MESSAGE_TYPE,
-	type SupervisorRequestMessageDetails,
-} from "../intercom/supervisor-ui.ts";
 import { registerHerdrStatusBridge, type HerdrStatusRun } from "../integrations/herdr-status.ts";
 import { hasLiveSubagentWork, registerPiWebSessionLiveness } from "../integrations/pi-web-session-liveness.ts";
 import { createRetainedNestedRouteTracker } from "../runs/background/retained-nested-route-tracker.ts";
@@ -486,9 +478,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		}, run);
 	};
 
-	const supervisorChannel = createNativeSupervisorChannel(pi, state, {
-		getCurrentOwnerStates: () => executor.getCurrentSupervisorOwnerStates(),
-	});
 	const waitSubscriptionManager = createWaitSubscriptionManager(pi, state);
 	const mainWatchdog = registerMainWatchdog(pi);
 	const resultDeliveryOwnership = createResultDeliveryOwnership(state);
@@ -566,7 +555,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	const { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs, dispose: disposeAsyncJobTracker } = createAsyncJobTracker(pi, state, DIRS.async, {
 		widgetEnabled: asyncWidgetEnabled,
 		onJobTerminal: () => refreshResultDelivery(),
-		supervisorRequestState: supervisorChannel.getSupervisorRequestState,
 	});
 	const resultWatcher = createResultWatcher(
 		pi,
@@ -579,7 +567,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			observeCompletion: (result) => scheduledRunManager.handleAsyncCompletion(result),
 			observedCompletionRunIds: () => scheduledRunManager.observedCompletionRunIds(),
 			hasDeliveryDemand: hasResultDeliveryDemand,
-			deliverIntercomResults: config.intercomBridge?.resultDelivery === true,
 			resultScanLogging: config.resultScanLogging,
 		},
 	);
@@ -641,21 +628,11 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 				console.error("Failed to refresh advertised agents; catalog withdrawn until refresh:", error);
 			}
 		},
-		activateSupervisorTransport: () => supervisorChannel.activateTransport(),
-		findPendingAsks: (target) => supervisorChannel.findPendingAsks(target),
 		refreshResultDelivery: () => refreshResultDelivery(),
 		trackRetainedNestedRoute: undefined,
 	};
 	const executor = createSubagentExecutor(executorDeps);
 	executorScheduled = executor.executeScheduled;
-
-	pi.registerMessageRenderer<SupervisorRequestMessageDetails>(SUPERVISOR_REQUEST_MESSAGE_TYPE, renderSupervisorRequest);
-	const registerEntryRenderer = (pi as unknown as {
-		registerEntryRenderer?: (customType: string, renderer: (entry: { data?: unknown }, options: { expanded: boolean }, theme: ExtensionContext["ui"]["theme"]) => Component | undefined) => void;
-	}).registerEntryRenderer;
-	if (typeof registerEntryRenderer === "function") {
-		registerEntryRenderer.call(pi, SUPERVISOR_REPLY_ENTRY_TYPE, renderSupervisorReply);
-	}
 
 	pi.registerMessageRenderer<SlashMessageDetails>(SLASH_RESULT_TYPE, (message, options, theme) => {
 		const details = resolveSlashMessageDetails(message.details);
@@ -831,7 +808,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs);
 
 	pi.on("agent_end", async (_event, ctx) => {
-		if (!ctx.hasUI) await drainOutstandingWork({ state, events: pi.events, hasPendingSupervisorRequest: supervisorChannel.hasPendingRequests });
+		if (!ctx.hasUI) await drainOutstandingWork({ state, events: pi.events });
 		const ownerSessionId = state.currentSessionId;
 		if (!ownerSessionId) return;
 		goalTurnId += 1;
@@ -879,7 +856,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	};
 	const asyncStartedHandler = (payload: unknown) => {
 		handleStarted(payload);
-		supervisorChannel.activateTransport();
 		refreshResultDelivery();
 		fleetStatus?.refresh();
 	};
@@ -962,7 +938,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		const previousRuntimeSessionId = state.currentSessionId;
 		resultDeliveryOwnership.claimPredecessor(previousSessionFile, previousRuntimeSessionId);
 		state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
-		state.supervisorOwnerSessionId = ctx.sessionManager.getSessionId() || null;
 		transitionResultDelivery();
 		state.parentSessionFile = ctx.sessionManager.getSessionFile();
 		state.trustedSessionFileRoot = state.parentSessionFile ? path.join(getAgentDir(), "sessions") : undefined;
@@ -1058,7 +1033,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			completionNotifier.dispose();
 			mainWatchdog.dispose();
 			scheduledRunManager.stop();
-			supervisorChannel.dispose();
 			waitSubscriptionManager.dispose();
 			fleetStatus?.dispose();
 			disposeAsyncJobTracker();
@@ -1082,7 +1056,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			promptTemplateBridge.dispose();
 			state.widgetsSuspended = false;
 			state.currentSessionId = null;
-			state.supervisorOwnerSessionId = null;
 			state.statusProjectionSessionId = null;
 			state.parentSessionFile = null;
 			parentSessionEnvValue = null;
@@ -1184,8 +1157,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			runs: activeHerdrRuns(),
 		});
 		rpcBridge.emitReady(ctx);
-		supervisorChannel.start();
-		supervisorChannel.activateTransport();
 	});
 
 	pi.on("session_shutdown", async () => {

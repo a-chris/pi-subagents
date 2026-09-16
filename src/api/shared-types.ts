@@ -13,8 +13,6 @@ export {
 	type ExecutionProjection,
 	type ExternalJobRunnerStatus,
 	type ExternalJobStatus,
-	type IntercomBridgeConfig,
-	type IntercomBridgeMode,
 	type JsonSchemaObject,
 	type OutputMode,
 	type ReviewProjection,

@@ -8,10 +8,7 @@ import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foregro
 import { resolveWaitToolConfig } from "../runs/background/wait-config.ts";
 import type { ChildRuntimeConfig } from "../runs/shared/child-runtime-config.ts";
 import { readNestedControlRequests, resolveInheritedNestedRoute, type NestedRoute, writeNestedControlResult } from "../runs/shared/nested-events.ts";
-import { deliverSubagentIntercomMessageEvent } from "../intercom/result-intercom.ts";
-import { createNativeSupervisorChannel, NATIVE_SUPERVISOR_TOOL_NAME, resolveSupervisorChannelDir } from "../intercom/native-supervisor-channel.ts";
 import { readStatus } from "../shared/utils.ts";
-import { resolveSubagentIntercomTarget } from "../intercom/intercom-bridge.ts";
 import { createSubagentParamsSchema } from "./schemas.ts";
 import { finalizeToolResult } from "./tool-result.ts";
 import { loadConfig, resolveAsyncByDefault } from "./config.ts";
@@ -102,18 +99,7 @@ function startNestedControlInboxListener(pi: ExtensionAPI, state: SubagentState,
 								} else if (!control.currentAgent) {
 									message = `Nested run ${request.targetRunId} has no active child message route.`;
 								} else {
-									const index = control.currentIndex ?? 0;
-									const target = resolveSubagentIntercomTarget(request.targetRunId, control.currentAgent, index);
-									ok = await deliverSubagentIntercomMessageEvent(
-										pi.events,
-										target,
-										`Follow-up for nested run ${request.targetRunId} (${control.currentAgent}):\n\n${request.message.trim()}`,
-										500,
-										{ source: "nested-resume", runId: request.targetRunId, agent: control.currentAgent, index },
-									);
-									message = ok
-										? `Delivered follow-up to live nested run ${request.targetRunId}.`
-										: `Nested child intercom target is not registered: ${target}`;
+									message = "Live nested follow-up delivery is unavailable: nested children complete and report instead of accepting mid-run messages. Wait for completion or steer the child.";
 								}
 							} catch (error) {
 								message = error instanceof Error ? error.message : String(error);
@@ -161,37 +147,6 @@ export default function registerFanoutChildSubagentExtension(pi: ExtensionAPI, c
 	const state = childConfig.runtimeState ?? createChildSafeState();
 	const asyncChildren = new Map<string, { dir: string; agents: string[] }>();
 	const foregroundChannels = new Set<string>();
-	const supervisorChannel = createNativeSupervisorChannel(pi, state, {
-		getChannelDirs: () => {
-			const dirs = new Set<string>();
-			for (const run of state.foregroundControls.values()) {
-				for (const child of run.activeChildren?.values() ?? []) dirs.add(resolveSupervisorChannelDir(run.runId, child.agent, child.index));
-			}
-			for (const run of state.foregroundRuns?.values() ?? []) {
-				for (const child of run.children) {
-					if (child.status === "detached") dirs.add(resolveSupervisorChannelDir(run.runId, child.agent, child.index));
-				}
-			}
-			const retiringForeground = [...foregroundChannels].filter(dir => !dirs.has(dir));
-			for (const dir of dirs) foregroundChannels.add(dir);
-			for (const dir of retiringForeground) dirs.add(dir);
-			const retiringAsync: string[] = [];
-			for (const [id, child] of asyncChildren) {
-				const status = readStatus(child.dir);
-				if (status && status.state !== "queued" && status.state !== "running") retiringAsync.push(id);
-				for (const [index, agent] of child.agents.entries()) dirs.add(resolveSupervisorChannelDir(id, agent, index));
-			}
-			return {
-				dirs: [...dirs],
-				retire: () => {
-					for (const dir of retiringForeground) foregroundChannels.delete(dir);
-					for (const id of retiringAsync) asyncChildren.delete(id);
-				},
-			};
-		},
-	});
-	const hasPendingSupervisorRequest = supervisorChannel.hasPendingRequests;
-	childConfig.hasPendingSupervisorRequest = hasPendingSupervisorRequest;
 	const executor = createSubagentExecutor({
 		pi,
 		state,
@@ -205,8 +160,6 @@ export default function registerFanoutChildSubagentExtension(pi: ExtensionAPI, c
 		discoverAgents,
 		allowMutatingManagementActions: false,
 		childRuntime: childConfig,
-		activateSupervisorTransport: supervisorChannel.activateTransport,
-		findPendingAsks: supervisorChannel.findPendingAsks,
 	});
 
 	const params = createSubagentParamsSchema();
@@ -227,28 +180,17 @@ export default function registerFanoutChildSubagentExtension(pi: ExtensionAPI, c
 	pi.registerTool(tool);
 	let unsubscribeAsyncStarted: (() => void) | undefined;
 	pi.on("session_start", (_event, ctx) => {
-		supervisorChannel.registerTools();
-		// The host applies the explicit allowlist to dynamic registration too.
-		if (!pi.getAllTools().some(tool => tool.name === NATIVE_SUPERVISOR_TOOL_NAME)) return;
-		// Downward asks belong to this coordinator, not its parent or persisted session file.
-		state.supervisorOwnerSessionId = ctx.sessionManager.getSessionId() || null;
 		unsubscribeAsyncStarted = pi.events.on(SUBAGENT_ASYNC_STARTED_EVENT, (payload: unknown) => {
 			const info = payload as AsyncStartedEvent;
 			if (!info.id || !info.asyncDir || info.sessionId !== state.currentSessionId) return;
 			const agents = info.agents ?? (info.agent ? [info.agent] : []);
 			asyncChildren.set(info.id, { dir: info.asyncDir, agents });
-			supervisorChannel.activateTransport();
 		});
-		supervisorChannel.start();
-		supervisorChannel.activateTransport();
 	});
 	pi.on("session_shutdown", () => {
 		unsubscribeAsyncStarted?.();
 		asyncChildren.clear();
 		foregroundChannels.clear();
-		supervisorChannel.dispose();
-		if (childConfig.hasPendingSupervisorRequest === hasPendingSupervisorRequest) childConfig.hasPendingSupervisorRequest = undefined;
-		state.supervisorOwnerSessionId = null;
 	});
 	const route = resolveNestedControlRoute(childConfig);
 	if (!route) return;

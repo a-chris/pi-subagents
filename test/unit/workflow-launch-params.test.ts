@@ -302,24 +302,6 @@ describe("workflow launch params", () => {
 		);
 	});
 
-	it("preserves a bridge override for retained workflow children", () => {
-		assert.deepEqual(
-			prepareWorkflowLaunchParams(
-				{},
-				{ resume: "retained-run", task: "Continue", intercomBridge: { mode: "off" } },
-				"workflow-run",
-				"continue",
-			),
-			{
-				action: "resume",
-				id: "retained-run",
-				message: "Continue",
-				workflowParentRunId: "workflow-run",
-				workflowKey: "continue",
-				intercomBridge: { mode: "off" },
-			},
-		);
-	});
 
 	it("forwards control defaults and overrides to retained workflow children", () => {
 		assert.deepEqual(

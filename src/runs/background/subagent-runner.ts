@@ -64,7 +64,6 @@ import {
 	buildControlEvent,
 	deriveActivityState,
 	claimControlNotification,
-	formatControlIntercomMessage,
 	formatControlNoticeMessage,
 	shouldEmitOpenToolAttention,
 } from "../shared/subagent-control.ts";
@@ -135,7 +134,6 @@ import { findModelInfo, resolveEffectiveThinking, splitKnownThinkingSuffix } fro
 import { assertThinkingWithinCeiling } from "../../shared/thinking-ceiling.ts";
 import { resolveLaunchBinding } from "../../shared/launch-contract.ts";
 import { writeInitialProgressFile } from "../../shared/settings.ts";
-import { resolveSubagentIntercomTarget } from "../../intercom/intercom-bridge.ts";
 import { parseBlockedReason } from "../shared/blocked-result.ts";
 import { acceptanceFailureMessage, aggregateAcceptanceReport, buildSkippedAcceptanceLedger, captureStagedIndexBaseline, evaluateAcceptance, formatAcceptancePrompt, resolveAcceptanceReportMode, resolveEffectiveAcceptance, stripAcceptanceReport } from "../shared/acceptance.ts";
 import { attachContractProjections, isAgentContract } from "../shared/agent-contract.ts";
@@ -165,8 +163,6 @@ import {
 	resolveChildWatchdogConfig,
 	type ChildWatchdogStatusEvent,
 } from "../../watchdog/child-status.ts";
-
-const INTERCOM_DETACH_RECEIPT = "Detached for intercom coordination before task completion.";
 
 // This process hosts child sessions. An ambient copy of pi-subagents loaded
 // into one of them must register nothing; the variable marks the process as a
@@ -201,8 +197,6 @@ export interface SubagentRunConfig {
 	worktreeProvider?: import("../../shared/types.ts").WorktreeProvider;
 	worktreeBranchPrefix?: string;
 	controlConfig?: ResolvedControlConfig;
-	controlIntercomTarget?: string;
-	childIntercomTargets?: Array<string | undefined>;
 	resultMode?: SubagentRunMode;
 	mode?: SubagentRunMode;
 	dynamicFanoutMaxItems?: number;
@@ -261,7 +255,6 @@ interface StepResult {
 	toolBudget?: ToolBudgetState;
 	toolBudgetBlocked?: boolean;
 	sessionFile?: string;
-	intercomTarget?: string;
 	model?: string;
 	nativeMachine?: import("../../shared/types.ts").SingleResult["nativeMachine"];
 	thinking?: string;
@@ -388,14 +381,6 @@ function appendDiagnosticJsonl(filePath: string, line: string, droppedEventType?
 	state.diagnosticsTruncated = true;
 }
 
-function isBlockingSupervisorTool(toolName: string | undefined, args: unknown): boolean {
-	if (!args || typeof args !== "object" || Array.isArray(args)) return false;
-	if (toolName === "contact_supervisor") {
-		const reason = (args as Record<string, unknown>).reason;
-		return reason === "need_decision" || reason === "interview_request";
-	}
-	return toolName === "intercom" && (args as Record<string, unknown>).action === "ask";
-}
 
 function findLatestSessionFile(sessionDir: string): string | null {
 	try {
@@ -692,8 +677,6 @@ interface SingleStepContext {
 	toolTimeoutMs?: number;
 	/** Effective step deadline (Date.now() + effective timeout) when a run budget exists. */
 	deadlineAt?: number;
-	childIntercomTarget?: string;
-	orchestratorIntercomTarget?: string;
 	nestedRoute?: NestedRouteInfo;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	runFanoutBudget?: RunFanoutBudgetDescriptor;
@@ -790,7 +773,6 @@ export async function runSingleStepInner(
 				timedOut: timedOut ? true : undefined,
 				stopped: stopped ? true : undefined,
 				sessionFile: imported.sessionFile,
-				intercomTarget: imported.intercomTarget,
 				model: imported.model,
 				requestedModel: imported.requestedModel,
 				contextOverflow: imported.contextOverflow,
@@ -1527,7 +1509,6 @@ export async function runSingleStepInner(
 	const acceptanceFailure = effectiveAcceptance ? acceptanceFailureMessage(effectiveAcceptance) : undefined;
 	const acceptanceCanFailRun = acceptanceFailure && effectiveAcceptance?.explicit && (finalResult?.exitCode ?? 1) === 0 && !finalResult?.interrupted && !timedOutAfterAcceptance && !stoppedAfterAcceptance && !isAgentContract(step.agentContract);
 	const effectiveFinalExitCode = timedOutAfterAcceptance || stoppedAfterAcceptance ? 1 : acceptanceCanFailRun ? 1 : finalResult?.exitCode ?? 1;
-	const intercomDetachReceipt = finalResult?.finalOutput === INTERCOM_DETACH_RECEIPT;
 	const blockedReason = !stoppedAfterAcceptance && !timedOutAfterAcceptance ? parseBlockedReason(finalResult?.finalOutput) : undefined;
 	const baseFinalError = stoppedAfterAcceptance
 		? ctx.stopMessage ?? "Subagent stopped by user."
@@ -1535,7 +1516,7 @@ export async function runSingleStepInner(
 			? finalResult?.error ?? ctx.timeoutMessage ?? "Subagent timed out."
 			: acceptanceCanFailRun
 					? (finalResult?.error ? `${finalResult.error}\n${acceptanceFailure}` : acceptanceFailure)
-					: finalResult?.error ?? (intercomDetachReceipt ? INTERCOM_DETACH_RECEIPT : undefined);
+					: finalResult?.error;
 	const effectiveFinalError = formatChildFailureDiagnostic({
 		error: baseFinalError,
 		afterCompactionSettlement: effectiveFinalExitCode !== 0 ? finalResult?.afterCompactionSettlement : undefined,
@@ -1589,7 +1570,6 @@ export async function runSingleStepInner(
 		error: effectiveFinalError,
 		blocked: blockedReason,
 		sessionFile: step.sessionFile,
-		intercomTarget: ctx.childIntercomTarget,
 		model: finalResult?.model,
 		nativeMachine: finalResult?.nativeMachine,
 		thinking: resolveEffectiveThinking(finalResult?.model, step.thinking),
@@ -2595,9 +2575,6 @@ export async function runSubagent(
 		});
 		mutatingFailureStates.push(...Array.from({ length: added.addedFlatSteps }, () => createMutatingFailureState()));
 		pendingToolResults.push(...Array.from({ length: added.addedFlatSteps }, () => undefined));
-		if (config.childIntercomTargets) {
-			config.childIntercomTargets = statusPayload.steps.map((statusStep, index) => resolveSubagentIntercomTarget(id, statusStep.agent, index));
-		}
 		writeStatusPayload();
 		for (const request of requests) {
 			appendJsonl(eventsPath, JSON.stringify({
@@ -2692,7 +2669,7 @@ export async function runSubagent(
 	const activeLongRunningSteps = new Set<number>();
 	const mutatingFailureStates = initialStatusSteps.map(() => createMutatingFailureState());
 	const pendingToolResults: Array<{ tool: string; path?: string; mutates: boolean; startedAt?: number } | undefined> = initialStatusSteps.map(() => undefined);
-	type ActiveToolCall = { key: string; tool: string; args: string; startedAt: number; path?: string; blocksSupervisor: boolean };
+	type ActiveToolCall = { key: string; tool: string; args: string; startedAt: number; path?: string };
 	const activeToolCalls = initialStatusSteps.map(() => new Map<string, ActiveToolCall>());
 	const activeToolKeysByName = initialStatusSteps.map(() => new Map<string, string[]>());
 	const activeToolSequences = initialStatusSteps.map(() => 0);
@@ -2713,7 +2690,7 @@ export async function runSubagent(
 		step.currentToolStartedAt = active.startedAt;
 		setOptionalProperty(step, "currentPath", active.path);
 	};
-	const recordActiveToolCall = (flatIndex: number, event: { toolCallId?: unknown; toolName: string }, input: { argsPreview: string; currentPath?: string; blocksSupervisor: boolean; now: number }): ActiveToolCall => {
+	const recordActiveToolCall = (flatIndex: number, event: { toolCallId?: unknown; toolName: string }, input: { argsPreview: string; currentPath?: string; now: number }): ActiveToolCall => {
 		const sequence = (activeToolSequences[flatIndex] ?? 0) + 1;
 		activeToolSequences[flatIndex] = sequence;
 		const key = toolTimeoutCallKey(event, sequence);
@@ -2722,7 +2699,6 @@ export async function runSubagent(
 			tool: event.toolName,
 			args: input.argsPreview,
 			startedAt: input.now,
-			blocksSupervisor: input.blocksSupervisor,
 			...(input.currentPath !== undefined ? { path: input.currentPath } : {}),
 		};
 		activeToolCalls[flatIndex]?.set(key, active);
@@ -2758,7 +2734,6 @@ export async function runSubagent(
 	const openToolAttentionTarget = (flatIndex: number, now: number): ActiveToolCall | undefined => [...(activeToolCalls[flatIndex]?.values() ?? [])]
 		.filter((active) => shouldEmitOpenToolAttention({ config: controlConfig, currentTool: active.tool, currentToolStartedAt: active.startedAt, now }))
 		.sort((left, right) => left.startedAt - right.startedAt)[0];
-	const supervisorAttentionSteps = new Map<number, ActivityState | undefined>();
 	const mutatingFailureWindowMs = 5 * 60_000;
 	const appendControlEvent = (rawEvent: ReturnType<typeof buildControlEvent>) => {
 		if (!controlConfig.enabled) return;
@@ -2770,23 +2745,13 @@ export async function runSubagent(
 			...(contextStep?.label ? { label: contextStep.label } : {}),
 			...(contextStep?.description ? { taskPreview: contextStep.description } : {}),
 		};
-		const childIntercomTarget = config.childIntercomTargets?.[event.index ?? statusPayload.currentStep];
-		const channels = event.type === "active_long_running"
-			? controlConfig.notifyChannels.filter((channel) => channel !== "intercom")
-			: controlConfig.notifyChannels;
-		if (channels.length === 0 || !claimControlNotification(controlConfig, event, emittedControlEventKeys, childIntercomTarget)) return;
+		const channels = controlConfig.notifyChannels;
+		if (channels.length === 0 || !claimControlNotification(controlConfig, event, emittedControlEventKeys)) return;
 		appendJsonl(eventsPath, JSON.stringify({
 			type: "subagent.control",
 			event,
 			channels,
-			childIntercomTarget,
-			noticeText: formatControlNoticeMessage(event, childIntercomTarget),
-			...(config.controlIntercomTarget && channels.includes("intercom") ? {
-				intercom: {
-					to: config.controlIntercomTarget,
-					message: formatControlIntercomMessage(event, childIntercomTarget),
-				},
-			} : {}),
+			noticeText: formatControlNoticeMessage(event),
 		}));
 	};
 	const syncTopLevelCurrentTool = (): void => {
@@ -3057,42 +3022,16 @@ export async function runSubagent(
 			const mutates = isMutatingTool(event.toolName, event.args, flatSteps[flatIndex]?.mutationTools);
 			const currentPath = resolveCurrentPath(event.toolName, event.args);
 			const argsPreview = extractToolArgsPreview(event.args ?? {});
-			const blocksSupervisor = isBlockingSupervisorTool(event.toolName, event.args);
 			step.toolCount = (step.toolCount ?? 0) + 1;
 			const configuredToolBudget = flatSteps[flatIndex]?.toolBudget;
 			if (configuredToolBudget) {
 				step.toolBudget = toolBudgetState(configuredToolBudget, step.toolCount);
 				statusPayload.toolBudget = step.toolBudget;
 			}
-			recordActiveToolCall(flatIndex, { toolCallId: (event as { toolCallId?: unknown }).toolCallId, toolName: event.toolName }, { argsPreview, currentPath, blocksSupervisor, now });
+			recordActiveToolCall(flatIndex, { toolCallId: (event as { toolCallId?: unknown }).toolCallId, toolName: event.toolName }, { argsPreview, currentPath, now });
 			pendingToolResults[flatIndex] = omitUndefinedProperties({ tool: event.toolName, path: currentPath, mutates, startedAt: now });
 			statusPayload.toolCount = (statusPayload.toolCount ?? 0) + 1;
 			syncTopLevelCurrentTool();
-			if (controlConfig.enabled && blocksSupervisor && step.activityState !== "needs_attention") {
-				const previous = step.activityState;
-				step.activityState = "needs_attention";
-				supervisorAttentionSteps.set(flatIndex, previous);
-				currentActivityState = "needs_attention";
-				statusPayload.activityState = "needs_attention";
-				appendControlEvent(buildControlEvent(omitUndefinedProperties({
-					type: "needs_attention",
-					from: previous,
-					to: "needs_attention",
-					runId: id,
-					agent: step.agent,
-					index: flatIndex,
-					ts: now,
-					message: `${step.agent} is waiting for a supervisor reply`,
-					reason: "supervisor_request",
-					turns: step.turnCount,
-					tokens: step.tokens?.total,
-					toolCount: step.toolCount,
-					currentTool: step.currentTool,
-					toolCallId: event.toolCallId,
-					currentToolDurationMs: 0,
-					currentPath: step.currentPath,
-				})));
-			}
 		} else if (event.type === "tool_execution_end") {
 			const endedTool = removeActiveToolCall(flatIndex, event);
 			if (endedTool) {
@@ -3100,13 +3039,6 @@ export async function runSubagent(
 				step.recentTools.push({ tool: endedTool.tool, args: endedTool.args, endMs: now });
 			}
 			refreshStepCurrentTool(flatIndex);
-			const supervisorPreviousActivity = supervisorAttentionSteps.get(flatIndex);
-			const stillBlockingSupervisor = [...(activeToolCalls[flatIndex]?.values() ?? [])].some((active) => active.blocksSupervisor);
-			const clearedSupervisorAttention = endedTool?.blocksSupervisor && !stillBlockingSupervisor ? supervisorAttentionSteps.delete(flatIndex) : false;
-			if (clearedSupervisorAttention && step.activityState === "needs_attention") {
-				setOptionalProperty(step, "activityState", supervisorPreviousActivity);
-				syncAggregateActivityState();
-			}
 			syncTopLevelCurrentTool();
 		} else if (event.type === "tool_result_end" && event.message) {
 			const toolSnapshot = pendingToolResults[flatIndex];
@@ -3682,9 +3614,6 @@ export async function runSubagent(
 				});
 			});
 			statusPayload.steps.splice(groupStartFlatIndex, 1, ...dynamicStatusSteps);
-			if (config.childIntercomTargets) {
-				config.childIntercomTargets = statusPayload.steps.map((statusStep, index) => resolveSubagentIntercomTarget(id, statusStep.agent, index));
-			}
 			mutatingFailureStates.splice(groupStartFlatIndex, 1, ...dynamicStatusSteps.map(() => createMutatingFailureState()));
 			pendingToolResults.splice(groupStartFlatIndex, 1, ...dynamicStatusSteps.map(() => undefined));
 			const materializedDelta = dynamicStatusSteps.length - 1;
@@ -3785,8 +3714,6 @@ export async function runSubagent(
 					piPackageRoot: config.piPackageRoot,
 					childSessions,
 					inheritedChildRuntime: config.inheritedChildRuntime,
-					childIntercomTarget: config.childIntercomTargets?.[fi],
-					orchestratorIntercomTarget: config.controlIntercomTarget,
 					nestedRoute: config.nestedRoute,
 					capabilityCeiling: config.capabilityCeiling,
 					runFanoutBudget: config.runFanoutBudget,
@@ -3895,7 +3822,6 @@ export async function runSubagent(
 					toolBudget: pr.toolBudget,
 					toolBudgetBlocked: pr.toolBudgetBlocked,
 					sessionFile: pr.sessionFile,
-					intercomTarget: pr.intercomTarget,
 					model: pr.model,
 					thinking: pr.thinking,
 					requestedModel: pr.requestedModel,
@@ -4199,8 +4125,6 @@ export async function runSubagent(
 							piPackageRoot: config.piPackageRoot,
 							childSessions,
 							inheritedChildRuntime: config.inheritedChildRuntime,
-							childIntercomTarget: config.childIntercomTargets?.[fi],
-							orchestratorIntercomTarget: config.controlIntercomTarget,
 							nestedRoute: config.nestedRoute,
 							capabilityCeiling: config.capabilityCeiling,
 							runFanoutBudget: config.runFanoutBudget,
@@ -4356,7 +4280,6 @@ export async function runSubagent(
 						toolBudget: pr.toolBudget,
 						toolBudgetBlocked: pr.toolBudgetBlocked,
 						sessionFile: pr.sessionFile,
-						intercomTarget: pr.intercomTarget,
 						model: pr.model,
 						thinking: pr.thinking,
 						requestedModel: pr.requestedModel,
@@ -4603,8 +4526,6 @@ export async function runSubagent(
 				piPackageRoot: config.piPackageRoot,
 				childSessions,
 				inheritedChildRuntime: config.inheritedChildRuntime,
-				childIntercomTarget: config.childIntercomTargets?.[flatIndex],
-				orchestratorIntercomTarget: config.controlIntercomTarget,
 				nestedRoute: config.nestedRoute,
 				capabilityCeiling: config.capabilityCeiling,
 				runFanoutBudget: config.runFanoutBudget,
@@ -4654,7 +4575,6 @@ export async function runSubagent(
 				success: !stopped && !childStopped && !timedOut && singleResult.interrupted !== true && singleResult.exitCode === 0 && singleResult.execution?.status !== "partial",
 				exitCode: stopped || childStopped ? 1 : timedOut ? 1 : singleResult.interrupted === true ? 0 : singleResult.exitCode,
 				sessionFile: singleResult.sessionFile,
-				intercomTarget: singleResult.intercomTarget,
 				model: singleResult.model,
 				thinking: singleResult.thinking,
 				requestedModel: singleResult.requestedModel,
@@ -5062,7 +4982,6 @@ export async function runSubagent(
 				toolBudget: r.toolBudget,
 				toolBudgetBlocked: r.toolBudgetBlocked || undefined,
 				sessionFile: r.sessionFile,
-				intercomTarget: r.intercomTarget,
 				model: r.model,
 				thinking: r.thinking,
 				requestedModel: r.requestedModel,
@@ -5119,7 +5038,6 @@ export async function runSubagent(
 			sessionId: config.sessionId,
 			completionOwnerId: config.completionOwnerId,
 			sessionFile: effectiveSessionFile,
-			intercomTarget: config.controlIntercomTarget,
 			shareUrl,
 			gistUrl,
 			shareError,

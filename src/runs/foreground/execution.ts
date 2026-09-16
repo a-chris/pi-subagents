@@ -25,8 +25,6 @@ import {
 	type SingleResult,
 	type Usage,
 	DEFAULT_MAX_OUTPUT,
-	INTERCOM_DETACH_REQUEST_EVENT,
-	INTERCOM_DETACH_RESPONSE_EVENT,
 	type AcceptanceLedger,
 	type ResolvedAcceptanceConfig,
 	truncateOutput,
@@ -403,9 +401,7 @@ async function runSingleAttempt(
 		systemPrompt: shared.acceptancePrompt ? `${shared.systemPrompt}\n${shared.acceptancePrompt}` : shared.systemPrompt,
 		mcpDirectTools: agent.mcpDirectTools,
 		cwd: options.cwd ?? runtimeCwd,
-		intercomSessionName: options.intercomSessionName,
 		sessionName: childSessionName,
-		orchestratorIntercomTarget: options.orchestratorIntercomTarget,
 		runId: options.runId,
 		childAgentName: agent.name,
 		childIndex: options.index ?? 0,
@@ -586,7 +582,6 @@ async function runSingleAttempt(
 		let sessionSettled = false;
 		let lifecycleFinished = false;
 		let detached = false;
-		let intercomStarted = false;
 		let assistantError: string | undefined;
 		let removeAbortListener: (() => void) | undefined;
 		let removeInterruptListener: (() => void) | undefined;
@@ -748,22 +743,6 @@ async function runSingleAttempt(
 		};
 		const childLifecycleState: ChildLifecycleState = { compactionRetryActive: false };
 
-		const unsubscribeIntercomDetach = options.intercomEvents?.on?.(INTERCOM_DETACH_REQUEST_EVENT, (payload) => {
-			if (!options.allowIntercomDetach || sessionSettled) return;
-			if (!payload || typeof payload !== "object") return;
-			const event = payload as { requestId?: unknown; runId?: unknown; agent?: unknown; childIndex?: unknown };
-			const requestId = event.requestId;
-			if (typeof requestId !== "string" || requestId.length === 0) return;
-			const hasRoute = event.runId !== undefined || event.agent !== undefined || event.childIndex !== undefined;
-			if (hasRoute) {
-				if (typeof event.runId === "string" && event.runId !== options.runId) return;
-				if (typeof event.agent === "string" && event.agent !== agent.name) return;
-				if (typeof event.childIndex === "number" && event.childIndex !== (options.index ?? 0)) return;
-			} else if (!intercomStarted) return;
-			const accepted = detachForeground("intercom coordination");
-			options.intercomEvents?.emit(INTERCOM_DETACH_RESPONSE_EVENT, { requestId, accepted, runId: options.runId, agent: agent.name, childIndex: options.index ?? 0 });
-		});
-
 		const finish = (code: number) => {
 			if (lifecycleFinished) return;
 			lifecycleFinished = true;
@@ -775,7 +754,6 @@ async function runSingleAttempt(
 				clearInterval(activityTimer);
 				activityTimer = undefined;
 			}
-			unsubscribeIntercomDetach?.();
 			removeAbortListener?.();
 			removeInterruptListener?.();
 			unsubscribe?.();
@@ -1049,9 +1027,6 @@ async function runSingleAttempt(
 				if (options.structuredOutput && evt.toolName === "structured_output") {
 					structuredOutputToolInvoked = true;
 					structuredOutputMessageStartIndex = result.messages?.length ?? 0;
-				}
-				if (options.allowIntercomDetach && (evt.toolName === "intercom" || evt.toolName === "contact_supervisor")) {
-					intercomStarted = true;
 				}
 				progress.toolCount++;
 				if (options.toolBudget) {
@@ -1575,7 +1550,7 @@ async function runSingleAttempt(
 	});
 	if (completionEvidence.fileMutation) {
 		result.effects = {
-			...(result.effects ?? {}),
+			...result.effects,
 			fileMutation: completionEvidence.fileMutation,
 		};
 	}

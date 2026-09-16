@@ -18,7 +18,6 @@ import {
 } from "./completion-batcher.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ChildWatchdogProgress, type ChildWatchdogWarningSummary, type ParallelHandoffReference, type ScheduleOrigin, type SubagentState } from "../../shared/types.ts";
 import { safeTerminalText } from "../../shared/display-text.ts";
-import { resolveSubagentResultStatus } from "../../intercom/result-intercom.ts";
 import { isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 import type { ResultDeliveryOwnership } from "./result-delivery-ownership.ts";
 
@@ -124,8 +123,6 @@ export interface CompletionNotification {
 	sessionId?: string | null;
 	completionOwnerId?: string | null;
 	triggerTurn?: boolean;
-	/** True when an acknowledged grouped intercom relay already delivered this run. */
-	intercomDelivered?: boolean;
 	parallelHandoff?: ParallelHandoffReference;
 	scheduleOrigin?: ScheduleOrigin;
 	asyncDir?: string;
@@ -214,17 +211,7 @@ function childStatus(child: CompletionChild, workflowState?: string): string {
 			? child.status
 		: undefined;
 	if (knownStatus) return knownStatus;
-	return resolveSubagentResultStatus({
-		success: child.success,
-		state: child.state ?? (child.success === undefined ? workflowState : undefined),
-		interrupted: child.interrupted,
-		detached: child.detached,
-		processSignal: child.processSignal,
-		timedOut: child.timedOut,
-		stopped: child.stopped,
-		turnBudgetExceeded: child.turnBudgetExceeded,
-		exitCode: typeof child.exitCode === "number" ? child.exitCode : undefined,
-	});
+	return child.stopped === true ? "stopped" : child.timedOut === true ? "failed" : child.interrupted === true ? "paused" : child.detached === true ? "detached" : child.success === true ? "complete" : "failed";
 }
 
 function structuredOutputText(value: unknown): string | undefined {
@@ -491,7 +478,7 @@ export function formatGroupedCompletion(details: SubagentNotifyDetails[]): strin
 const notificationDebug = debuglog("pi-subagents-notify");
 type TraceIdentity = Pick<CompletionNotification, "id" | "runId" | "source">;
 type NotificationReason = "disposed" | "missing_session" | "foreground_session_mismatch" | "not_owned"
-	| "intercom_delivered" | "deduped_ttl" | "deduped_pending" | "batch_deferred"
+	| "deduped_ttl" | "deduped_pending" | "batch_deferred"
 	| "emit_foreground_session_mismatch" | "emit_not_owned" | "send_accepted" | "send_failed" | "dispose_pending";
 
 // Slice before sanitizing: diagnostic work and each identity are bounded even for
@@ -747,10 +734,6 @@ export default function registerSubagentNotify(
 		} else if (!ownsResult(result.sessionId, result.completionOwnerId)) {
 			traceNotification("not_owned", result);
 			return Promise.resolve(false);
-		}
-		if (result.intercomDelivered === true) {
-			traceNotification("intercom_delivered", result);
-			return Promise.resolve(true);
 		}
 		const key = buildCompletionKey(result, "notify");
 		const seenAt = seen.get(key);

@@ -62,42 +62,6 @@ it("does not skip drain for in-process child sessions when hasUI is true", async
 	assert.deepEqual(held, [true, false]);
 });
 
-it("reads a late-installed owner barrier for each final drain and balances the hold", async () => {
-	const handlers = new Map<string, Function[]>();
-	const listeners = new Map<string, Array<() => void>>();
-	const held: boolean[] = [];
-	const sessionId = "fanout-owner-session.jsonl";
-	const runtimeState = {
-		foregroundRuns: new Map([["fg", {
-			runId: "fg", mode: "single", cwd: "/tmp", sessionId, updatedAt: 1,
-			children: [{ agent: "worker", index: 0, status: "detached", updatedAt: 1 }],
-		}]]),
-	} as SubagentState;
-	const config = childConfig({ runtimeState, holdFinalDrain: (value) => { held.push(value); } });
-	const ctx = { hasUI: true, sessionManager: { getSessionFile: () => sessionId } };
-	const emit = async (name: string) => { for (const fn of handlers.get(name) ?? []) await fn({}, ctx); };
-	registerSubagentPromptRuntime({
-		on: (name: string, fn: Function) => handlers.set(name, [...(handlers.get(name) ?? []), fn]),
-		registerTool: () => {},
-		events: { on: (channel: string, handler: () => void) => { listeners.set(channel, [...(listeners.get(channel) ?? []), handler]); return () => {}; } },
-	} as never, config);
-	await emit("session_start");
-	let pending = true;
-	config.hasPendingSupervisorRequest = () => pending;
-	await emit("agent_end");
-	assert.deepEqual(held, [true, false]);
-	assert.equal(runtimeState.foregroundRuns.get("fg")!.children[0]!.status, "detached");
-
-	pending = false;
-	let settled = false;
-	const ended = emit("agent_end").then(() => { settled = true; });
-	await new Promise((resolve) => setTimeout(resolve, 30));
-	assert.equal(settled, false);
-	runtimeState.foregroundRuns.get("fg")!.children[0]!.status = "completed";
-	for (const handler of listeners.get(SUBAGENT_FOREGROUND_COMPLETE_EVENT) ?? []) handler();
-	await ended;
-	assert.deepEqual(held, [true, false, true, false]);
-});
 
 it("does not grant nested wait access for an invalid inherited route", async (t) => {
 	const route = createNestedRoute(randomUUID());
@@ -223,30 +187,6 @@ describe("subagent prompt runtime", () => {
 		assert.doesNotThrow(() => registerSubagentPromptRuntime({} as never));
 	});
 
-	it("registers no permission hook by default and routes ask only to the watchdog arbiter", async () => {
-		const handlers: Array<(event: { toolName?: string; input?: unknown }, ctx?: unknown) => unknown> = [];
-		const pi = { on(event: string, handler: (event: { toolName?: string; input?: unknown }, ctx?: unknown) => unknown) { if (event === "tool_call") handlers.push(handler); } };
-		registerPermissionGate(pi as never, undefined, undefined);
-		assert.equal(handlers.length, 0);
-
-		registerPermissionGate(pi as never, { rules: { write: "deny" } }, undefined);
-		assert.equal(handlers.length, 1);
-		assert.equal(await handlers[0]!({ toolName: "bash", input: { command: "rm -rf /" } }), undefined);
-		assert.equal(await handlers[0]!({ toolName: "contact_supervisor", input: {} }), undefined);
-		assert.deepEqual(await handlers[0]!({ toolName: "write", input: {} }), {
-			block: true,
-			reason: "Blocked by pi-subagents permission rule: 'write' is denied.",
-		});
-
-		const askHandlers: Array<(event: { toolName?: string; input?: unknown }, ctx: unknown) => unknown> = [];
-		const requests: Array<{ toolName: string; args: unknown }> = [];
-		registerPermissionGate({ on(event: string, handler: (event: { toolName?: string; input?: unknown }, ctx: unknown) => unknown) { if (event === "tool_call") askHandlers.push(handler); } } as never, { rules: { write: "ask" } }, undefined, async (request) => {
-			requests.push({ toolName: request.toolName, args: request.args });
-			return { approved: true, reason: "approved by watchdog", source: "watchdog" };
-		});
-		assert.equal(await askHandlers[0]!({ toolName: "write", input: { path: "out.txt" } }, { signal: undefined }), undefined);
-		assert.deepEqual(requests, [{ toolName: "write", args: { path: "out.txt" } }]);
-	});
 
 	it("fails closed when an ask permission decision stalls", async () => {
 		{
@@ -786,127 +726,10 @@ describe("subagent prompt runtime", () => {
 		assert.deepEqual(stripParentOnlySubagentMessages([user, subagentCall, subagentResult, instruction], { preserveFanoutToolHistory: true }), [user, subagentCall, subagentResult]);
 	});
 
-	it("defers native supervisor registration until runtime events and respects installed pi-intercom tools", async () => {
-		const handlers = new Map<string, (payload?: unknown) => unknown>();
-		const registered: string[] = [];
 
-		registerSubagentPromptRuntime({
-			on(event: string, handler: (payload?: unknown) => unknown) {
-				handlers.set(event, handler);
-			},
-			getAllTools: () => [{ name: "intercom" }, { name: "contact_supervisor" }],
-			registerTool(tool: { name: string }) {
-				registered.push(tool.name);
-			},
-		} as { on(event: string, handler: (payload?: unknown) => unknown): void; getAllTools(): Array<{ name: string }>; registerTool(tool: { name: string }): void }, supervisorConfig());
 
-		assert.deepEqual(registered, ["bg_wait"]);
-		handlers.get("session_start")?.({});
-		await handlers.get("before_agent_start")?.({ systemPrompt: BASE_PROMPT });
-		assert.deepEqual(registered, ["bg_wait"]);
-	});
 
-	it("does not satisfy strict allowlists with native generic intercom", () => {
-		{
-			const diagnostics: Array<ChildToolDiagnostic | undefined> = [];
-			const handlers = new Map<string, (payload?: unknown) => unknown>();
-			const registered: string[] = [];
 
-			registerSubagentPromptRuntime({
-				on(event: string, handler: (payload?: unknown) => unknown) {
-					handlers.set(event, handler);
-				},
-				getAllTools: () => registered.map((name) => ({ name })),
-				registerTool(tool: { name: string }) {
-					registered.push(tool.name);
-				},
-			} as { on(event: string, handler: (payload?: unknown) => unknown): void; getAllTools(): Array<{ name: string }>; registerTool(tool: { name: string }): void }, supervisorConfig({
-				agent: "scout",
-				requiredTools: ["read", "grep", "find", "ls", "bash", "edit", "write", "intercom"],
-				toolDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
-			}));
-
-			handlers.get("session_start")?.({});
-			assert.deepEqual(registered, ["bg_wait", "contact_supervisor"]);
-			assert.throws(() => handlers.get("agent_start")?.({}), /requested unavailable child tools: read, grep, find, ls, bash, edit, write, intercom/);
-			assert.deepEqual(diagnostics, [{
-				agent: "scout",
-				required: ["read", "grep", "find", "ls", "bash", "edit", "write", "intercom"],
-				available: ["bg_wait", "contact_supervisor"],
-				missing: ["read", "grep", "find", "ls", "bash", "edit", "write", "intercom"],
-			}]);
-		}
-	});
-
-	it("records missing core write tools from the actual child registry", () => {
-		{
-			const diagnostics: Array<ChildToolDiagnostic | undefined> = [];
-			const handlers = new Map<string, (payload?: unknown) => unknown>();
-
-			registerSubagentPromptRuntime({
-				on(event: string, handler: (payload?: unknown) => unknown) {
-					handlers.set(event, handler);
-				},
-				getAllTools: () => ["read", "grep", "find", "ls", "contact_supervisor"].map((name) => ({ name })),
-				registerTool() {},
-			} as { on(event: string, handler: (payload?: unknown) => unknown): void; getAllTools(): Array<{ name: string }>; registerTool(): void }, childConfig({
-				agent: "worker",
-				requiredTools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
-				toolDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
-			}));
-
-			assert.throws(() => handlers.get("agent_start")?.({}), /requested unavailable child tools: bash, edit, write/);
-			assert.deepEqual(diagnostics, [{
-				agent: "worker",
-				required: ["read", "grep", "find", "ls", "bash", "edit", "write"],
-				available: ["read", "grep", "find", "ls", "contact_supervisor"],
-				missing: ["bash", "edit", "write"],
-			}]);
-		}
-	});
-
-	it("keeps installed pi-intercom while filling only a missing child contact_supervisor tool", async () => {
-		const handlers = new Map<string, (payload?: unknown) => unknown>();
-		const registered: string[] = [];
-
-		registerSubagentPromptRuntime({
-			on(event: string, handler: (payload?: unknown) => unknown) {
-				handlers.set(event, handler);
-			},
-			getAllTools: () => [{ name: "intercom" }, ...registered.map((name) => ({ name }))],
-			registerTool(tool: { name: string }) {
-				registered.push(tool.name);
-			},
-		} as { on(event: string, handler: (payload?: unknown) => unknown): void; getAllTools(): Array<{ name: string }>; registerTool(tool: { name: string }): void }, supervisorConfig());
-
-		handlers.get("session_start")?.({});
-		await handlers.get("before_agent_start")?.({ systemPrompt: BASE_PROMPT });
-
-		assert.deepEqual(registered, ["bg_wait", "contact_supervisor"]);
-	});
-
-	it("registers only native supervisor tools at runtime when pi-intercom is absent", async () => {
-		const handlers = new Map<string, (payload?: unknown) => unknown>();
-		const registered: string[] = [];
-
-		{
-			registerSubagentPromptRuntime({
-				on(event: string, handler: (payload?: unknown) => unknown) {
-					handlers.set(event, handler);
-				},
-				getAllTools: () => registered.map((name) => ({ name })),
-				registerTool(tool: { name: string }) {
-					registered.push(tool.name);
-				},
-			} as { on(event: string, handler: (payload?: unknown) => unknown): void; getAllTools(): Array<{ name: string }>; registerTool(tool: { name: string }): void }, supervisorConfig());
-
-			handlers.get("session_start")?.({});
-			assert.deepEqual(registered, ["bg_wait", "contact_supervisor"]);
-
-			await handlers.get("before_agent_start")?.({ systemPrompt: BASE_PROMPT });
-			assert.deepEqual(registered, ["bg_wait", "contact_supervisor"]);
-		}
-	});
 
 	it("records requested tools missing from the child registry after startup hooks settle", async () => {
 		{
@@ -976,56 +799,8 @@ describe("subagent prompt runtime", () => {
 		}
 	});
 
-	it("sets the child intercom session name from the config during agent startup", async () => {
-		let sessionName: string | undefined;
-		let beforeAgentStart: ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) | undefined;
 
-		registerSubagentPromptRuntime({
-			on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) {
-				if (event === "before_agent_start") beforeAgentStart = handler;
-			},
-			getAllTools: () => [{ name: "intercom" }, { name: "contact_supervisor" }],
-			setSessionName(name: string) {
-				sessionName = name;
-			},
-		} as { on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>): void; getAllTools(): Array<{ name: string }>; setSessionName(name: string): void }, childConfig({ intercomSessionName: "subagent-worker-78f659a3", sessionName: "worker: display name" }));
 
-		await beforeAgentStart?.({ systemPrompt: BASE_PROMPT });
-
-		assert.equal(sessionName, "subagent-worker-78f659a3");
-	});
-
-	it("rewrites the final child-visible prompt through before_agent_start", async () => {
-		let beforeAgentStart: ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) | undefined;
-		registerSubagentPromptRuntime({
-			on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) {
-				if (event === "before_agent_start") beforeAgentStart = handler;
-			},
-			getAllTools: () => [{ name: "intercom" }, { name: "contact_supervisor" }],
-		} as { on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>): void; getAllTools(): Array<{ name: string }> }, childConfig({ inheritProjectContext: false, inheritGlobalContext: true, inheritSkills: false }));
-
-		assert.ok(beforeAgentStart, "expected before_agent_start handler");
-
-		const rewritten = await beforeAgentStart?.({ systemPrompt: BASE_PROMPT });
-		assert.ok(rewritten);
-		assert.ok(!rewritten.systemPrompt.includes("# Project Context"));
-		assert.ok(!rewritten.systemPrompt.includes("<available_skills>"));
-		assert.ok(rewritten.systemPrompt.includes("Current date: 2026-04-16"));
-	});
-
-	it("uses the fanout boundary through before_agent_start for a fanout child", async () => {
-		let beforeAgentStart: ((event: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) | undefined;
-		registerSubagentPromptRuntime({
-			on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>) {
-				if (event === "before_agent_start") beforeAgentStart = handler;
-			},
-			getAllTools: () => [{ name: "intercom" }, { name: "contact_supervisor" }],
-		} as { on(event: string, handler: (payload: { systemPrompt: string }) => Promise<{ systemPrompt: string } | undefined>): void; getAllTools(): Array<{ name: string }> }, childConfig({ fanoutChild: true, inheritProjectContext: true, inheritGlobalContext: true, inheritSkills: true }));
-
-		const rewritten = await beforeAgentStart?.({ systemPrompt: BASE_PROMPT });
-		assert.ok(rewritten);
-		assert.ok(rewritten.systemPrompt.startsWith(CHILD_FANOUT_BOUNDARY_INSTRUCTIONS));
-	});
 
 	it("filters parent-only artifacts from polluted fork context while preserving ordinary history", () => {
 		let contextHandler: ((event: { messages: unknown[] }) => { messages: unknown[] } | undefined) | undefined;

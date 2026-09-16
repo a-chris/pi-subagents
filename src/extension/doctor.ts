@@ -5,7 +5,6 @@ import { isAsyncAvailable } from "../runs/background/async-execution.ts";
 import { formatSpawnBudgetSummary, getSpawnBudgetSnapshot } from "../runs/shared/spawn-budget.ts";
 import { getActiveAsyncCapacitySnapshot, resolveAbandonedSlotReleaseAfterMs, resolveMaxActiveAsyncRunsPerSession } from "../runs/background/active-async-capacity.ts";
 
-import { diagnoseIntercomBridge, type IntercomBridgeDiagnostic } from "../intercom/intercom-bridge.ts";
 import { discoverAvailableSkills, type SkillSource } from "../agents/skills.ts";
 import {
 	DIRS,
@@ -28,7 +27,6 @@ interface DoctorDeps {
 	isAsyncAvailable: () => boolean;
 	discoverAgentsAll: typeof discoverAgentsAll;
 	discoverAvailableSkills: typeof discoverAvailableSkills;
-	diagnoseIntercomBridge: typeof diagnoseIntercomBridge;
 }
 
 interface DoctorReportInput {
@@ -59,7 +57,6 @@ const DEFAULT_DEPS: DoctorDeps = {
 	isAsyncAvailable,
 	discoverAgentsAll,
 	discoverAvailableSkills,
-	diagnoseIntercomBridge,
 };
 
 function errorText(error: unknown): string {
@@ -156,16 +153,6 @@ function formatDiscovery(input: DoctorReportInput, deps: DoctorDeps): string[] {
 	];
 }
 
-function formatIntercomDiagnostic(diagnostic: IntercomBridgeDiagnostic, context: "fresh" | "fork" | undefined): string[] {
-	const lines = [
-		`- bridge: ${diagnostic.active ? "active" : "inactive"}${diagnostic.reason ? ` (${diagnostic.reason})` : ""}`,
-		`- mode: ${diagnostic.mode}; context: ${context ?? "unspecified"}`,
-		`- orchestrator target: ${diagnostic.orchestratorTarget ?? "not available"}`,
-		`- supervisor channel: ${diagnostic.supervisorChannelAvailable ? "available" : "unavailable"} (${diagnostic.extensionDir})`,
-	];
-	return lines;
-}
-
 function formatSpawnBudgetSection(input: DoctorReportInput): string[] {
 	const snapshot = getSpawnBudgetSnapshot(input.state, input.config, input.currentSessionId ?? input.state.currentSessionId);
 	return [
@@ -258,13 +245,6 @@ export function buildDoctorReport(input: DoctorReportInput): string {
 		"Permission system",
 		...formatPermissionSystemSection(),
 		"",
-		"Intercom bridge",
-		...lineFromCheck("intercom bridge", () => formatIntercomDiagnostic(deps.diagnoseIntercomBridge({
-			config: input.config.intercomBridge,
-			context: input.context,
-			orchestratorTarget: input.orchestratorTarget,
-			cwd: input.cwd,
-		}), input.context).join("\n")).split("\n"),
 	];
 	return lines.join("\n");
 }

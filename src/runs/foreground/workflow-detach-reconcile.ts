@@ -6,7 +6,6 @@ import {
 	DIRS,
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	type AsyncStatus,
-	type IntercomEventBus,
 	type SingleResult,
 	type SubagentState,
 	type WorkflowTerminalResolution,
@@ -172,7 +171,7 @@ export function reconcileDetachedWorkflowChildCompletion(input: {
 	workflowRunId: string;
 	childRunId: string;
 	result: SingleResult;
-	events?: IntercomEventBus;
+	events?: { emit(channel: string, data: unknown): void };
 	workflowKey?: string;
 }): boolean {
 	const job = input.state.asyncJobs.get(input.workflowRunId);
@@ -230,7 +229,7 @@ export function reconcileDetachedWorkflowChildCompletion(input: {
 		summary,
 		children: results,
 		baseResult: {
-			...(existing ?? {}),
+			...existing,
 			id: next.runId,
 			runId: next.runId,
 			toolCallId: next.toolCallId,

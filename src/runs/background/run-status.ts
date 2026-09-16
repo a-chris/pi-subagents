@@ -12,9 +12,7 @@ import { formatActivityLabel } from "../../shared/status-format.ts";
 import { DIRS, type AsyncStatus, type Details, type ForegroundRunControl, type ForegroundResumeRun, type NestedRunSummary, type SteeringStatus, type SubagentState } from "../../shared/types.ts";
 import { inspectActiveAsyncCapacityOwner, type ActiveAsyncCapacityInspection } from "./active-async-capacity.ts";
 import { readStatus } from "../../shared/utils.ts";
-import { resolveSubagentIntercomTarget } from "../../intercom/intercom-bridge.ts";
 import { normalizeExternalCliRunnerStatus } from "../shared/external-cli-contract.ts";
-import { resolveSubagentResultStatus } from "../../intercom/result-intercom.ts";
 import { readProcessTerminal, sanitizeProcessTerminal } from "./process-terminal.ts";
 import { formatWaitSubscriptions } from "./wait-subscriptions.ts";
 import { resolveAsyncRunLocation } from "./async-resume.ts";
@@ -130,13 +128,9 @@ function formatResumeGuidance(runId: string | undefined, children: Array<{ agent
 		.filter(({ child }) => typeof child.agent === "string");
 	if (!runId || knownChildren.length === 0) return "Resume: unavailable; no child session file was persisted.";
 	const workflowChildren = knownChildren.filter(({ child }) => typeof child.runId === "string" && child.runId.trim() && hasExistingSessionFile(child.sessionFile));
-	const supervisorDetachedWorkflowChildren = workflowChildren.filter(({ child }) => child.status === "paused" && child.activityState === "needs_attention");
-	const resumableWorkflowChildren = workflowChildren.filter(({ child }) => !(child.status === "paused" && child.activityState === "needs_attention"));
+	const resumableWorkflowChildren = workflowChildren;
 	if (workflowChildren.length > 0) {
-		return [
-			...supervisorDetachedWorkflowChildren.map(({ child }) => `Recovery workflow child${typeof child.workflowKey === "string" && child.workflowKey.trim() ? ` '${child.workflowKey}'` : ""}: reply to the supervisor request first, then wait with bg_wait({ id: "${child.runId}" }). Use subagent({ action: "status", id: "${child.runId}" }) to recover the result; do not resume or launch a replacement while it remains detached.`),
-			...resumableWorkflowChildren.map(({ child }) => `Revive workflow child${typeof child.workflowKey === "string" && child.workflowKey.trim() ? ` '${child.workflowKey}'` : ""}: subagent({ action: "resume", id: "${child.runId}", message: "..." })`),
-		].join("\n");
+		return resumableWorkflowChildren.map(({ child }) => `Revive workflow child${typeof child.workflowKey === "string" && child.workflowKey.trim() ? ` '${child.workflowKey}'` : ""}: subagent({ action: "resume", id: "${child.runId}", message: "..." })`).join("\n");
 	}
 	const singleSessionFile = knownChildren[0]?.child.sessionFile ?? fallbackSessionFile;
 	if (children.length === 1 && knownChildren.length === 1 && hasExistingSessionFile(singleSessionFile)) {
@@ -234,7 +228,6 @@ function formatRememberedForegroundStatus(run: ForegroundResumeRun): string {
 	const detached = run.children.some((child) => child.status === "detached");
 	const resumable = run.children.find((child) => hasExistingSessionFile(child.sessionFile));
 	if (detached) {
-		lines.push(`Recovery: reply to the supervisor request first, then wait with bg_wait({ id: "${run.runId}" }); do not resume or launch a replacement while any child remains detached.`);
 	} else if (resumable) {
 		lines.push(run.children.length === 1
 			? `Revive: subagent({ action: "resume", id: "${run.runId}", message: "..." })`
@@ -669,7 +662,6 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				const stepOutputPath = path.join(asyncDir, `output-${index}.log`);
 				if (stepOutputPath !== outputPath && fs.existsSync(stepOutputPath)) lines.push(`  Output: ${stepOutputPath}`);
 				if (step.status === "running" && step.runner?.type !== "external-cli" && step.runner?.type !== "external-job" && status.mode !== "workflow") {
-					lines.push(`  Intercom target: ${resolveSubagentIntercomTarget(status.runId, step.agent, index)} (if registered)`);
 					lines.push(`  Steer: subagent({ action: "steer", id: "${status.runId}", index: ${index}, message: "..." })`);
 				} else if (step.status === "running" && (step.runner?.type === "external-cli" || step.runner?.type === "external-job")) {
 					lines.push("  Steer: unavailable; external runners do not accept live messages.");
@@ -731,16 +723,7 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				}
 			}
 			const childStatuses = Array.isArray(data.results)
-				? data.results.map((child) => resolveSubagentResultStatus({
-					success: child.success,
-					state: child.state,
-					interrupted: child.interrupted,
-					timedOut: child.timedOut,
-					stopped: child.stopped,
-					turnBudgetExceeded: child.turnBudgetExceeded,
-					processSignal: child.processSignal,
-					exitCode: typeof child.exitCode === "number" ? child.exitCode : undefined,
-				}))
+				? data.results.map((child) => child.stopped === true ? "stopped" : child.timedOut === true ? "failed" : child.interrupted === true ? "paused" : child.exitCode === 0 ? "complete" : "failed")
 				: [];
 			const status = data.state === "stopped" || data.stopped === true || childStatuses.includes("stopped")
 				? "stopped"

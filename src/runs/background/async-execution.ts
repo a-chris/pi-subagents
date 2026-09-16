@@ -48,7 +48,6 @@ import {
 	type AsyncStatus,
 	type ArtifactConfig,
 	type Details,
-	type IntercomBridgeConfig,
 	type HerdrMachineReference,
 	type JsonSchemaObject,
 	type MaxOutputConfig,
@@ -223,8 +222,6 @@ interface AsyncChainParams {
 	worktreeProvider?: import("../../shared/types.ts").WorktreeProvider;
 	worktreeBranchPrefix?: string;
 	controlConfig?: ResolvedControlConfig;
-	controlIntercomTarget?: string;
-	childIntercomTarget?: (agent: string, index: number) => string | undefined;
 	nestedRoute?: NestedRouteInfo;
 	acceptance?: AcceptanceInput;
 	fast?: boolean;
@@ -298,9 +295,6 @@ interface AsyncSingleParams {
 	worktreeBranchPrefix?: string;
 	worktree?: boolean;
 	controlConfig?: ResolvedControlConfig;
-	intercomBridge?: IntercomBridgeConfig;
-	controlIntercomTarget?: string;
-	childIntercomTarget?: (agent: string, index: number) => string | undefined;
 	nestedRoute?: NestedRouteInfo;
 	acceptance?: AcceptanceInput;
 	timeoutMs?: number;
@@ -1389,8 +1383,6 @@ export function executeAsyncChain(
 		worktreeProvider,
 		worktreeBranchPrefix,
 		controlConfig,
-		controlIntercomTarget,
-		childIntercomTarget,
 		nestedRoute,
 	} = params;
 	const resultMode = params.resultMode ?? "chain";
@@ -1467,21 +1459,6 @@ export function executeAsyncChain(
 	const { steps, runnerCwd, workflowGraph, eventChain } = built;
 	const deadlineAt = params.timeoutMs !== undefined ? Date.now() + params.timeoutMs : undefined;
 	const initialUsageBudget = usageBudgetState(params.usageBudget, undefined);
-	let childTargetIndex = 0;
-	const childIntercomTargets = childIntercomTarget ? steps.flatMap((step) => {
-		if (!("parallel" in step) && "importAsyncRoot" in step && step.importAsyncRoot) {
-			childTargetIndex++;
-			return [undefined];
-		}
-		if ("parallel" in step) {
-			if (!Array.isArray(step.parallel)) {
-				childTargetIndex++;
-				return [undefined];
-			}
-			return step.parallel.map((task) => childIntercomTarget(task.agent, childTargetIndex++));
-		}
-		return "agent" in step ? [childIntercomTarget(step.agent, childTargetIndex++)] : [undefined];
-	}) : undefined;
 	const initialStatusSteps = eventChain.flatMap((step) => isParallelStep(step)
 		? step.parallel.map((task) => ({ agent: task.agent, ...(statusStepDescription(task.task) ? { description: statusStepDescription(task.task) } : {}), ...(task.label ? { label: task.label } : {}), ...(task.as ? { outputName: task.as } : {}), status: "pending" as const }))
 		: isDynamicParallelStep(step)
@@ -1528,8 +1505,6 @@ export function executeAsyncChain(
 				controlConfig,
 				toolBudget: params.toolBudget,
 				usageBudget: params.usageBudget,
-				controlIntercomTarget,
-				childIntercomTargets,
 				resultMode,
 				dynamicFanoutMaxItems: params.dynamicFanoutMaxItems,
 				timeoutMs: params.timeoutMs,
@@ -1636,9 +1611,6 @@ export function executeAsyncChain(
 						path: nestedAddress.path,
 						asyncDir,
 						pid: spawnResult.pid,
-						ownerIntercomTarget: ctx.childRuntime?.intercomSessionName,
-						leafIntercomTarget: childIntercomTargets?.[0],
-						intercomTarget: childIntercomTargets?.[0],
 						ownerState: "live",
 						mode: resultMode,
 						state: "running",
@@ -1727,8 +1699,6 @@ export function executeAsyncSingle(
 		worktreeProvider,
 		worktreeBranchPrefix,
 		controlConfig,
-		controlIntercomTarget,
-		childIntercomTarget,
 		nestedRoute,
 	} = params;
 	let lane: WorkflowLaneMetadata | undefined;
@@ -2034,7 +2004,6 @@ export function executeAsyncSingle(
 		...(params.acceptance !== undefined ? { acceptance: params.acceptance } : {}),
 		...(controlConfig ? { controlConfig } : {}),
 		...(params.context ? { context: params.context } : {}),
-		...(params.intercomBridge !== undefined ? { intercomBridge: params.intercomBridge } : {}),
 		...(params.baseRef !== undefined ? { baseRef: params.baseRef } : {}),
 		...(deadlineAt !== undefined ? { absoluteDeadlineAt: deadlineAt } : {}),
 		...(resolvedToolBudget.budget ? { initialToolBudget: resolvedToolBudget.budget } : {}),
@@ -2151,8 +2120,6 @@ export function executeAsyncSingle(
 				checkpointBeforeDeadlineMs: params.checkpointBeforeDeadlineMs,
 				toolBudget: params.toolBudget,
 				usageBudget: params.usageBudget,
-				controlIntercomTarget,
-				childIntercomTargets: childIntercomTarget ? [childIntercomTarget(agent, 0)] : undefined,
 				resultMode: "single",
 				launchContractDigest,
 				launchResolvedExtensions,
@@ -2226,9 +2193,6 @@ export function executeAsyncSingle(
 						path: nestedAddress.path,
 						asyncDir,
 						pid: spawnResult.pid,
-						ownerIntercomTarget: ctx.childRuntime?.intercomSessionName,
-						leafIntercomTarget: childIntercomTarget?.(agent, 0),
-						intercomTarget: childIntercomTarget?.(agent, 0),
 						ownerState: "live",
 						mode: "single",
 						state: "running",

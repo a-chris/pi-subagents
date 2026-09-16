@@ -13,7 +13,6 @@ import {
 	DIRS,
 	SUBAGENT_CHILD_STATUS_EVENT,
 	SUBAGENT_CONTROL_EVENT,
-	SUBAGENT_CONTROL_INTERCOM_EVENT,
 	SUBAGENT_STEERING_NOTICE_EVENT,
 	WIDGET_ANIMATION_INTERVAL_MS,
 } from "../../shared/types.ts";
@@ -41,7 +40,6 @@ interface AsyncJobTrackerOptions {
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
 	/** Resolve native supervisor requests without scanning supervisor mailboxes. */
-	supervisorRequestState?: (event: ControlEvent) => "pending" | "resolved" | "unknown";
 }
 
 const CONTROL_EVENT_READ_CHUNK_BYTES = 64 * 1024;
@@ -299,33 +297,16 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 					return;
 				}
 				if ((parsed as { type?: unknown }).type !== "subagent.control") return;
-				const record = parsed as { event?: ControlEvent; channels?: string[]; childIntercomTarget?: string; noticeText?: string; intercom?: { to?: string; message?: string } };
+				const record = parsed as { event?: ControlEvent; channels?: string[]; noticeText?: string };
 				if (!record.event || !Array.isArray(record.channels)) return;
-				if (record.event.type === "needs_attention" && record.event.reason === "supervisor_request" && options.supervisorRequestState) {
-					let requestState: "pending" | "resolved" | "unknown" = "unknown";
-					try {
-						requestState = options.supervisorRequestState(record.event);
-					} catch (error) {
-						console.error(`Failed to resolve supervisor request state for async control event in '${job.asyncDir}':`, error);
-					}
-					if (requestState === "resolved") return;
-				}
 				const payload = {
 					event: record.event,
 					source: "async" as const,
 					asyncDir: job.asyncDir,
-					childIntercomTarget: record.childIntercomTarget,
-					noticeText: record.noticeText ?? formatControlNoticeMessage(record.event, record.childIntercomTarget),
+					noticeText: record.noticeText ?? formatControlNoticeMessage(record.event),
 				};
 				if (record.channels.includes("event")) {
 					pi.events.emit(SUBAGENT_CONTROL_EVENT, payload);
-				}
-				if (record.event.type !== "active_long_running" && record.channels.includes("intercom") && record.intercom?.to && record.intercom.message) {
-					pi.events.emit(SUBAGENT_CONTROL_INTERCOM_EVENT, {
-						...payload,
-						to: record.intercom.to,
-						message: record.intercom.message,
-					});
 				}
 			};
 			let readCursor = cursor;

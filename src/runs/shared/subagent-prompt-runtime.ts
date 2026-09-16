@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { BeforeProviderRequestEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { registerNativeSupervisorClient } from "../../intercom/native-supervisor-channel.ts";
 import { permissionDecision } from "./permissions.ts";
 import type { SteerRequest } from "../background/control-channel.ts";
 import { RUNTIME_EXTENSION_ACK_EVENT, isRuntimeAcknowledgedExtensionId } from "./runtime-acknowledged-extensions.ts";
@@ -21,7 +20,6 @@ import { inheritedNestedRouteOf } from "./nested-events.ts";
 import { registerWaitTool } from "../background/wait-tool.ts";
 import { drainOutstandingWork } from "../background/auto-drain.ts";
 import {
-	childSupervisorMetadata,
 	evaluateChildToolDiagnostic,
 	type ChildPermissions,
 	type ChildRuntimeConfig,
@@ -85,6 +83,7 @@ function registerRuntimeExtensionAcknowledgements(pi: ExtensionAPI, sink: ((ids:
 	try {
 		const events = (pi as { events?: { on?: (event: string, handler: (payload: unknown) => unknown) => unknown } }).events;
 		events?.on?.(RUNTIME_EXTENSION_ACK_EVENT, acknowledge);
+		// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the runtime events these sinks consume.
 		const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event?: unknown, ctx?: unknown) => unknown) => void;
 		onRuntimeEvent("agent_end", finalize);
 		onRuntimeEvent("session_shutdown", finalize);
@@ -342,6 +341,7 @@ export function registerPermissionGate(
 	if (!rules || Object.keys(rules).length === 0) return;
 	const rawWatchdogConfig = childWatchdog ? JSON.stringify(childWatchdog) : undefined;
 	const timeoutMs = childWatchdog?.agentEndTimeoutMs ?? 30_000;
+	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the tool_call events this child runtime consumes.
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string; input?: unknown }, ctx: ExtensionContext) => unknown) => void;
 	onRuntimeEvent("tool_call", async (event, ctx) => {
 		const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
@@ -386,6 +386,7 @@ function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undef
 	let toolCount = 0;
 	let softNudged = false;
 	const sendUserMessage = (pi as { sendUserMessage?: (content: string, options: { deliverAs: "steer" }) => unknown }).sendUserMessage;
+	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the tool_call events this budget sink consumes.
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: { toolName?: string }) => unknown) => void;
 	onRuntimeEvent("tool_call", (event) => {
 		const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
@@ -406,6 +407,7 @@ function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undef
 function registerStructuredOutputTool(pi: ExtensionAPI, structured: NonNullable<ChildRuntimeConfig["structuredOutput"]>): void {
 	const required = structured.acceptanceReport === "required";
 	const parameters = createStructuredOutputToolParameters(structured.schema, { acceptanceReport: structured.acceptanceReport });
+	// SAFETY: pi.registerTool accepts typed ToolDefinitions; this internal registration wraps the structured-output tool with runtime-captured parameters.
 	const registerTool = pi.registerTool as unknown as (tool: {
 		name: string;
 		label: string;
@@ -453,6 +455,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 	registerPermissionGate(pi, config.permissions, config.childWatchdog);
 	registerToolBudget(pi, config.toolBudget);
 	registerChildWatchdog(pi, config.childWatchdog, config.watchdogStatus);
+	// SAFETY: config.runtimeState is a structurally complete SubagentState when present; the fallback literal mirrors the same shape for headless child runtimes.
 	const waitState = config.runtimeState ?? {
 		baseCwd: "",
 		currentSessionId: null,
@@ -470,18 +473,11 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 	} as unknown as SubagentState;
 	const nestedRootRunId = inheritedNestedRouteOf(config)?.rootRunId;
 	if (typeof pi.registerTool === "function") registerWaitTool(pi, waitState, config.waitTool.enabled, undefined, config.waitTool.defaultTimeoutMs, { nestedRootRunId });
-	const supervisorMetadata = childSupervisorMetadata(config);
-	let nativeSupervisorClientRegistered = false;
-	const registerNativeSupervisorClientOnce = (): void => {
-		if (nativeSupervisorClientRegistered) return;
-		nativeSupervisorClientRegistered = true;
-		registerNativeSupervisorClient(pi, supervisorMetadata);
-	};
+	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the runtime lifecycle events this child runtime consumes.
 	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: unknown, ctx?: ExtensionContext) => unknown) => void;
 	onRuntimeEvent("session_start", (_event: unknown, ctx?: ExtensionContext) => {
 		const sessionManager = (ctx as { sessionManager?: Parameters<typeof resolveCurrentSessionId>[0] } | undefined)?.sessionManager;
 		waitState.currentSessionId = sessionManager ? resolveCurrentSessionId(sessionManager) : null;
-		registerNativeSupervisorClientOnce();
 	});
 	onRuntimeEvent("agent_start", () => {
 		if (!config.requiredTools) return;
@@ -498,7 +494,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 		}
 		config.holdFinalDrain?.(true);
 		try {
-			await drainOutstandingWork({ state: waitState, events: pi.events, nestedRootRunId, hasPendingSupervisorRequest: config.hasPendingSupervisorRequest }, drainObservation);
+			await drainOutstandingWork({ state: waitState, events: pi.events, nestedRootRunId }, drainObservation);
 		} finally {
 			config.holdFinalDrain?.(false);
 		}
@@ -519,12 +515,8 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 
 	onRuntimeEvent("before_agent_start", async (event: unknown) => {
 		if (!event || typeof event !== "object" || !("systemPrompt" in event) || typeof event.systemPrompt !== "string") return undefined;
-		registerNativeSupervisorClientOnce();
-		// The intercom target is a routing address and always wins; the display
-		// name (agent + task excerpt, computed by the parent at launch) only
-		// applies when the bridge is not addressing this child.
 		const childSessionName = config.intercomSessionName || config.sessionName;
-		if (childSessionName && typeof pi.setSessionName === "function") {
+		if (childSessionName && pi.setSessionName) {
 			pi.setSessionName(childSessionName);
 		}
 

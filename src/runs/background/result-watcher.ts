@@ -5,20 +5,11 @@ import { createFileCoalescer } from "../../shared/file-coalescer.ts";
 import { shouldUseNativeFsWatch } from "../../shared/watch-strategy.ts";
 import {
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
-	type IntercomEventBus,
 	type NestedRunSummary,
 	type ParallelHandoffReference,
-	type SubagentResultIntercomChild,
 	type SubagentOutputState,
 	type SubagentState,
 } from "../../shared/types.ts";
-import {
-	attachNestedChildrenToResultChildren,
-	buildSubagentResultIntercomPayload,
-	compactNestedResultChildren,
-	deliverSubagentResultIntercomEvent,
-	resolveSubagentResultStatus,
-} from "../../intercom/result-intercom.ts";
 import { projectNestedRegistryForRoot, sanitizeSummary } from "../shared/nested-events.ts";
 import { resolveWatchPath } from "../../shared/utils.ts";
 import { recordWaitCompletion } from "./wait-completions.ts";
@@ -52,8 +43,6 @@ type ResultWatcherDeps = {
 	observedCompletionRunIds?: () => Iterable<string>;
 	/** Parses a relevant result payload after its lightweight identity check. */
 	parseResult?: (raw: string) => ResultFileData;
-	/** External grouped-result transport. Disable when native completion notifications own delivery. */
-	deliverIntercomResults?: boolean;
 	/** Coalesces result-file events. Tests can lower this without changing retry timing. */
 	coalesceDelayMs?: number;
 	/** Returns true while a durable completion source needs periodic delivery checks. */
@@ -76,6 +65,7 @@ type ResultFileChild = {
 	success?: boolean;
 	state?: string;
 	interrupted?: boolean;
+	detached?: boolean;
 	timedOut?: boolean;
 	stopped?: boolean;
 	turnBudgetExceeded?: boolean;
@@ -84,7 +74,6 @@ type ResultFileChild = {
 	artifactPaths?: { outputPath?: string };
 	outputSaveError?: string;
 	artifactOutputSaveFailed?: true;
-	intercomTarget?: string;
 	children?: unknown;
 };
 
@@ -94,7 +83,6 @@ type ResultFileData = CompletionNotification & {
 	results?: ResultFileChild[];
 	nestedChildren?: unknown;
 	asyncDir?: string;
-	intercomTarget?: string;
 	parallelHandoff?: ParallelHandoffReference;
 	notificationDeliveredAt?: unknown;
 };
@@ -200,7 +188,7 @@ function markDeliveredNotification(resultPath: string, data: ResultFileData, run
  * so old callbacks can never emit or delete after reload/session replacement.
  */
 export function createResultWatcher(
-	pi: { events: IntercomEventBus },
+	pi: { events: { emit(channel: string, data: unknown): void } },
 	state: SubagentState,
 	resultsDir: string,
 	completionTtlMs: number,
@@ -216,7 +204,6 @@ export function createResultWatcher(
 	const timers = deps.timers ?? { setTimeout, clearTimeout, setInterval, clearInterval };
 	const notifier = deps.notifier ?? { deliver: async () => true };
 	const parseResult = deps.parseResult ?? ((raw: string) => JSON.parse(raw) as ResultFileData);
-	const deliverIntercomResults = deps.deliverIntercomResults !== false;
 	const pendingTriggerTurn = new Map<string, boolean>();
 	const processing = new Set<string>();
 	const identityCache = new Map<string, { signature: string; identity: ResultFileIdentity }>();
@@ -438,10 +425,10 @@ export function createResultWatcher(
 				sessionId,
 			});
 			const hasExplicitNestedChildren = data.nestedChildren !== undefined;
-			let nestedChildren = compactNestedResultChildren(sanitizeNestedResultChildren(data.nestedChildren, resultPath, "nestedChildren"));
+			let nestedChildren = sanitizeNestedResultChildren(data.nestedChildren, resultPath, "nestedChildren");
 			if (!nestedChildren?.length && !hasExplicitNestedChildren) {
 				try {
-					nestedChildren = compactNestedResultChildren(projectNestedRegistryForRoot(runId)?.children);
+					nestedChildren = projectNestedRegistryForRoot(runId)?.children;
 				} catch (error) {
 					console.error(`Failed to enrich subagent result file '${resultPath}' with nested registry children; will retry later:`, error);
 					scheduleResult(file, triggerTurn, RETRY_DELAY_MS);
@@ -473,7 +460,7 @@ export function createResultWatcher(
 			const resultChildren: ResultFileChild[] = hasResultChildren
 				? data.results!
 				: [{ agent: data.agent ?? undefined, output: data.summary, outputState: "unknown", success: data.success }];
-			const normalizedChildren = attachNestedChildrenToResultChildren(runId, resultChildren.map((result = {}, index): SubagentResultIntercomChild => {
+			const normalizedChildren = resultChildren.map((result = {}, index): { agent: string; sessionName?: string; status: string; outputState: SubagentOutputState; summary: string; index: number; artifactPath?: string; sessionPath?: string; children?: unknown } => {
 				const baseOutput = hasResultChildren ? result.output : result.output ?? data.summary;
 				const hasRealOutput = typeof baseOutput === "string" && baseOutput.trim().length > 0;
 				const structuredPreview = result.structuredOutput === undefined ? undefined : JSON.stringify(result.structuredOutput, null, 2).slice(0, 4_000);
@@ -493,15 +480,7 @@ export function createResultWatcher(
 				return {
 					agent: result.agent ?? data.agent ?? `step-${index + 1}`,
 					...(result.sessionName ? { sessionName: result.sessionName } : {}),
-					status: resolveSubagentResultStatus({
-						success: result.success,
-						state: childState,
-						interrupted: result.interrupted,
-						timedOut: result.timedOut,
-						stopped: result.stopped,
-						turnBudgetExceeded: result.turnBudgetExceeded,
-						processSignal: result.processSignal,
-					}),
+					status: result.stopped === true ? "stopped" : result.timedOut === true ? "failed" : result.interrupted === true ? "paused" : result.detached === true ? "detached" : childState === "paused" || childState === "stopped" ? childState : result.success === false || childState === "failed" ? "failed" : "completed",
 					outputState: result.outputState === "present" || result.outputState === "absent" || result.outputState === "unknown"
 						? result.outputState
 						: "unknown",
@@ -509,10 +488,9 @@ export function createResultWatcher(
 					index,
 					artifactPath: result.artifactPaths?.outputPath,
 					...(typeof sessionPath === "string" && fsApi.existsSync(sessionPath) ? { sessionPath } : {}),
-					...(result.intercomTarget ? { intercomTarget: result.intercomTarget } : {}),
 					...(childNestedChildren ? { children: childNestedChildren } : {}),
 				};
-			}), nestedChildren);
+			});
 
 			if (alreadyDelivered) {
 				markSeenWithTtl(state.completionSeen, completionKey, Date.now(), completionTtlMs);
@@ -530,32 +508,11 @@ export function createResultWatcher(
 				return;
 			}
 
-			const intercomTarget = data.intercomTarget?.trim();
-			let intercomDelivered = false;
-			if (deliverIntercomResults && intercomTarget && triggerTurn) {
-				const mode = data.mode === "single" || data.mode === "parallel" || data.mode === "chain" || data.mode === "workflow"
-					? data.mode
-					: resultChildren.length > 1 ? "chain" : "single";
-				intercomDelivered = await deliverSubagentResultIntercomEvent(pi.events, buildSubagentResultIntercomPayload({
-					to: intercomTarget,
-					runId,
-					mode,
-					source: "async",
-					children: normalizedChildren,
-					asyncId: data.id ?? undefined,
-					asyncDir: data.asyncDir,
-					...(data.parallelHandoff ? { parallelHandoff: data.parallelHandoff } : {}),
-				}));
-				if (!ownsCompletion(sessionId, completionOwnerId, epoch)) return;
-				if (!intercomDelivered) console.error(`Subagent async grouped result intercom delivery was not acknowledged for '${resultPath}'.`);
-			}
-
 			const accepted = await notifier.deliver({
 				...data,
 				id: data.id ?? runId,
 				runId,
 				triggerTurn,
-				intercomDelivered,
 				...(nestedChildren?.length ? { nestedChildren } : {}),
 				...(Array.isArray(data.results) ? {
 					results: hasResultChildren ? normalizedChildren.map((child, index) => ({
@@ -590,7 +547,6 @@ export function createResultWatcher(
 					...data,
 					runId,
 					triggerTurn,
-					intercomDelivered,
 					...(nestedChildren?.length ? { nestedChildren } : {}),
 					...(Array.isArray(data.results) ? {
 						results: hasResultChildren ? normalizedChildren.map((child, index) => ({

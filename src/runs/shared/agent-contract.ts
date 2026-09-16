@@ -7,32 +7,30 @@ export function isAgentContract(contract: AgentContract | undefined): boolean {
 
 export function buildExecutionProjection(result: Pick<SingleResult, "exitCode" | "error" | "interrupted" | "timedOut" | "stopped" | "detached" | "finalOutput">): ExecutionProjection {
 	if (result.detached) {
-		return { status: "detached", success: false, exitCode: result.exitCode, detached: true, ...(result.error ? { error: result.error } : {}) };
+		const projection: ExecutionProjection = { status: "detached", success: false, exitCode: result.exitCode, detached: true };
+		if (result.error) projection.error = result.error;
+		return projection;
 	}
 	if (result.stopped) {
-		return { status: "stopped", success: false, exitCode: result.exitCode, stopped: true, ...(result.error ? { error: result.error } : {}) };
+		const projection: ExecutionProjection = { status: "stopped", success: false, exitCode: result.exitCode, stopped: true };
+		if (result.error) projection.error = result.error;
+		return projection;
 	}
 	if (result.interrupted) {
-		return { status: "paused", success: false, exitCode: result.exitCode, interrupted: true, ...(result.error ? { error: result.error } : {}) };
+		const projection: ExecutionProjection = { status: "paused", success: false, exitCode: result.exitCode, interrupted: true };
+		if (result.error) projection.error = result.error;
+		return projection;
 	}
 	const blockedReason = !result.timedOut ? parseBlockedReason(result.finalOutput) : undefined;
 	if (blockedReason) {
-		return {
-			status: "blocked",
-			success: false,
-			exitCode: result.exitCode,
-			blocked: true,
-			error: result.error ?? `Blocked: ${blockedReason}`,
-		};
+		const projection: ExecutionProjection = { status: "blocked", success: false, exitCode: result.exitCode, blocked: true, error: result.error ?? `Blocked: ${blockedReason}` };
+		return projection;
 	}
 	const success = result.exitCode === 0 && !result.error && !result.timedOut;
-	return {
-		status: success ? "completed" : "failed",
-		success,
-		exitCode: result.exitCode,
-		...(result.error ? { error: result.error } : {}),
-		...(result.timedOut ? { timedOut: true } : {}),
-	};
+	const projection: ExecutionProjection = { status: success ? "completed" : "failed", success, exitCode: result.exitCode };
+	if (result.error) projection.error = result.error;
+	if (result.timedOut) projection.timedOut = true;
+	return projection;
 }
 
 export function buildReviewProjection(result: Pick<SingleResult, "acceptance">): ReviewProjection {

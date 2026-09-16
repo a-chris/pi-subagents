@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { previewDisplayText } from "../../shared/display-text.ts";
 
 const CONTROL_EVENT_TYPES: ControlEventType[] = ["active_long_running", "needs_attention"];
-const CONTROL_NOTIFICATION_CHANNELS: ControlNotificationChannel[] = ["event", "async", "intercom"];
+const CONTROL_NOTIFICATION_CHANNELS: ControlNotificationChannel[] = ["event", "async"];
 const DEFAULT_NOTIFY_ON: ControlEventType[] = ["active_long_running", "needs_attention"];
 
 export const DEFAULT_CONTROL_CONFIG: ResolvedControlConfig = {
@@ -248,15 +248,11 @@ export function formatControlNoticeMessage(event: ControlEvent, childIntercomTar
 			"Hint: Inspect status first. Use steer for a top-level live async child, routed resume for a live nested child, or resume to revive a paused/completed/failed child.",
 			`Top-level live async nudge: ${steerCommand}`,
 			`Routed live nested nudge: ${nestedResumeCommand}`,
-			childIntercomTarget ? `Direct intercom target: ${childIntercomTarget}` : undefined,
 			`Status: subagent({ action: "status", id: "${runTarget}" })`,
 			`Interrupt: subagent({ action: "interrupt", id: "${runTarget}" })`,
 		].filter((line): line is string => Boolean(line)).join("\n");
 	}
 
-	const supervisorHint = event.reason === "supervisor_request"
-		? "Supervisor request: reply to the pending request. If subagent_supervisor pending is empty, check intercom pending because an external intercom tool may own the request."
-		: undefined;
 	const facts = formatLongRunningFacts(event);
 	return [
 		`Subagent needs attention: ${event.agent}`,
@@ -264,11 +260,9 @@ export function formatControlNoticeMessage(event: ControlEvent, childIntercomTar
 		`Signal: ${event.message}`,
 		facts ? `Facts: ${facts}` : undefined,
 		event.recentFailureSummary ? `Recent failures: ${event.recentFailureSummary}` : undefined,
-		supervisorHint,
 		"Hint: Inspect status first unless the run is clearly blocked. Use steer for a top-level live async child, routed resume for a live nested child, or resume to revive a paused/completed/failed child.",
 		`Top-level live async nudge: ${steerCommand}`,
 		`Routed live nested nudge: ${nestedResumeCommand}`,
-		childIntercomTarget ? `Direct intercom target: ${childIntercomTarget}` : undefined,
 		`Status: subagent({ action: "status", id: "${runTarget}" })`,
 		`Interrupt: subagent({ action: "interrupt", id: "${runTarget}" })`,
 	].filter((line): line is string => Boolean(line)).join("\n");

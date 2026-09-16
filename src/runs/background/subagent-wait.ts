@@ -50,12 +50,9 @@ import {
 import { formatAsyncRunList, listAsyncRuns, type AsyncRunSummary } from "./async-status.ts";
 import {
 	DIRS,
-	INTERCOM_DETACH_REQUEST_EVENT,
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	SUBAGENT_FOREGROUND_COMPLETE_EVENT,
 	SUBAGENT_CONTROL_EVENT,
-	SUBAGENT_CONTROL_INTERCOM_EVENT,
-	SUBAGENT_RESULT_INTERCOM_EVENT,
 	type Details,
 	type ForegroundResumeRun,
 	type SubagentState,
@@ -122,8 +119,6 @@ export interface SubagentWaitDeps {
 	failOnFailedRuns?: boolean;
 	/** Internal auto-drain mode surfaces actionable attention as an error. */
 	failOnAttention?: boolean;
-	/** Durable owned supervisor-request barrier used by headless auto-drain. */
-	hasPendingSupervisorRequest?: () => boolean;
 	/** Arm a durable exact-target wait subscription in a long-lived interactive runtime. */
 	subscribe?: (input: { targetKind: "async" | "foreground"; runId: string; requestedId: string; timeoutMs: number }) => { token: string; expiresAt: number };
 	/** Injectable provider protocol surfaces for deterministic tests. */
@@ -142,12 +137,9 @@ export interface SubagentWaitDeps {
 
 /** Bus channels that indicate a run changed state or needs attention. */
 const WAKE_CHANNELS = [
-	INTERCOM_DETACH_REQUEST_EVENT,
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	SUBAGENT_FOREGROUND_COMPLETE_EVENT,
 	SUBAGENT_CONTROL_EVENT,
-	SUBAGENT_CONTROL_INTERCOM_EVENT,
-	SUBAGENT_RESULT_INTERCOM_EVENT,
 ];
 
 function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -252,12 +244,6 @@ function formatForegroundAttention(run: ForegroundResumeRun, children: ReturnTyp
 /** A running run that has flagged it needs the parent's attention. */
 function needsAttention(run: AsyncRunSummary): boolean {
 	return run.activityState === "needs_attention" || run.steps.some((step) => step.activityState === "needs_attention");
-}
-
-function hasSupervisorTool(run: AsyncRunSummary): boolean {
-	return run.currentTool === "contact_supervisor"
-		|| run.currentTool === "intercom"
-		|| run.steps.some((step) => step.currentTool === "contact_supervisor" || step.currentTool === "intercom");
 }
 
 function backgroundWorkIdentity(item: RegisteredBackgroundWorkItem): string {
@@ -398,47 +384,10 @@ function windowElapsedResult(
 	};
 }
 
-function supervisorYieldResult(
-	activeRunIds: string[],
-	activeProviderItems: readonly RegisteredBackgroundWorkItem[] = [],
-): AgentToolResult<Details> {
-	return {
-		content: [{ type: "text", text: "Wait yielded for a pending supervisor request. Background work remains active and will continue after the supervisor reply." }],
-		details: {
-			mode: "management",
-			results: [],
-			wait: {
-				reason: "supervisor_request",
-				timedOut: false,
-				activeRunIds,
-				activeProviderItems: activeProviderItems.map(({ provider, id }) => ({ provider, id })),
-			},
-		},
-	};
-}
-
 interface InitialWaitScope {
 	asyncRunIds: Set<string>;
 	foregroundRuns: Array<{ runId: string; sessionId?: string; detachedIndices: Set<number> }>;
 	providerIds: Set<string>;
-}
-
-function supervisorYieldForScope(scope: InitialWaitScope, params: SubagentWaitParams, deps: SubagentWaitDeps, nowMs: number): AgentToolResult<Details> {
-	try {
-		const activeAsyncIds = new Set(activeRunsForSession(params.id ? { id: params.id } : {}, deps).map((run) => run.id));
-		const activeRunIds = new Set([...scope.asyncRunIds].filter((id) => activeAsyncIds.has(id)));
-		for (const initial of scope.foregroundRuns) {
-			const current = deps.state.foregroundRuns?.get(initial.runId);
-			if (!current || current.sessionId !== initial.sessionId) continue;
-			if (current.children.some((child) => initial.detachedIndices.has(child.index) && child.status === "detached")) activeRunIds.add(initial.runId);
-		}
-		const activeProviderItems = scope.providerIds.size > 0
-			? backgroundWorkForSession(deps, nowMs).items.filter((item) => scope.providerIds.has(backgroundWorkIdentity(item)))
-			: [];
-		return supervisorYieldResult([...activeRunIds], activeProviderItems);
-	} catch (error) {
-		return result(error instanceof Error ? error.message : String(error), true);
-	}
 }
 
 /** Build the live status shown while async work keeps bg_wait blocked. */
@@ -563,7 +512,6 @@ async function waitForDetachedForegroundRun(
 	now: () => number,
 	pollIntervalMs: number,
 	timeoutMs: number,
-	supervisorYield: () => AgentToolResult<Details>,
 ): Promise<AgentToolResult<Details>> {
 	const initialDetachedIndices = new Set(run.children.filter((child) => child.status === "detached").map((child) => child.index));
 	while (true) {
@@ -574,7 +522,6 @@ async function waitForDetachedForegroundRun(
 		if (!current || current.sessionId !== run.sessionId) {
 			return result(`Remembered foreground run "${run.runId}" disappeared before a terminal child result was recorded. Completion cannot be confirmed; do not launch a replacement without checking the originating child session.`, true);
 		}
-		if (deps.hasPendingSupervisorRequest?.()) return supervisorYield();
 		const pending = current.children.filter((child) => initialDetachedIndices.has(child.index) && child.status === "detached");
 		const attention = foregroundChildrenNeedingAttention(current, initialDetachedIndices);
 		if (attention.length > 0) return formatForegroundAttention(current, attention, now() - startedAt);
@@ -607,13 +554,11 @@ async function waitForSessionDetachedForegroundRuns(
 	now: () => number,
 	pollIntervalMs: number,
 	timeoutMs: number,
-	supervisorYield: () => AgentToolResult<Details>,
 ): Promise<AgentToolResult<Details>> {
 	const texts: string[] = [];
 	for (const run of runs) {
-		const one = await waitForDetachedForegroundRun(run, signal, deps, startedAt, now, pollIntervalMs, timeoutMs, supervisorYield);
+		const one = await waitForDetachedForegroundRun(run, signal, deps, startedAt, now, pollIntervalMs, timeoutMs);
 		if (one.isError) return one;
-		if (one.details.wait?.reason === "supervisor_request") return one;
 		if (one.details.wait?.reason === "window_elapsed") {
 			const activeRunIds = runs.filter((initial) => {
 				const current = deps.state.foregroundRuns?.get(initial.runId);
@@ -729,13 +674,12 @@ export async function waitForSubagents(
 		})),
 		providerIds: initialProviderIds,
 	};
-	const supervisorYield = () => supervisorYieldForScope(initialScope, params, deps, now());
 	if (selectedForeground) {
-		return waitForDetachedForegroundRun(selectedForeground, signal, deps, startedAt, now, pollIntervalMs, timeoutMs, supervisorYield);
+		return waitForDetachedForegroundRun(selectedForeground, signal, deps, startedAt, now, pollIntervalMs, timeoutMs);
 	}
 	if (active.length === 0 && providerActive.length === 0) {
 		if (waitForAll && !params.id && foreground.length > 0) {
-			return waitForSessionDetachedForegroundRuns(foreground, signal, deps, startedAt, now, pollIntervalMs, timeoutMs, supervisorYield);
+			return waitForSessionDetachedForegroundRuns(foreground, signal, deps, startedAt, now, pollIntervalMs, timeoutMs);
 		}
 		return result(params.id
 			? `No active run matched "${params.id}". Nothing to wait for.`
@@ -746,14 +690,9 @@ export async function waitForSubagents(
 	const initialCount = initialAsyncIds.size + initialProviderIds.size;
 	const stopOnAttention = params.stopOnAttention ?? deps.stopOnAttention !== false;
 	let attention = active.filter((run) => needsAttention(run));
-	let supervisorBarrier = false;
 
 	const isDone = (): boolean => {
-		if (deps.hasPendingSupervisorRequest?.()) {
-			supervisorBarrier = true;
-			return true;
-		}
-		if (attention.some((run) => initialAsyncIds.has(run.id) && (stopOnAttention || hasSupervisorTool(run)))) return true;
+		if (attention.some((run) => initialAsyncIds.has(run.id) && stopOnAttention)) return true;
 		const activeAsyncIds = new Set(active.map((run) => run.id));
 		const activeProviderIds = new Set(providerActive.map(backgroundWorkIdentity));
 		if (waitForAll) {
@@ -798,10 +737,6 @@ export async function waitForSubagents(
 			return result(error instanceof Error ? error.message : String(error), true);
 		}
 	}
-	if (supervisorBarrier) {
-		return supervisorYield();
-	}
-
 	let terminalSummary: string;
 	let finishedAsyncCount: number;
 	let failedAsyncCount: number;
@@ -823,11 +758,8 @@ export async function waitForSubagents(
 	}
 
 	const relevantAttention = attention.filter((run) => initialAsyncIds.has(run.id));
-	const supervisorAttentionHint = relevantAttention.some(hasSupervisorTool)
-		? " Reply to any pending supervisor request. If subagent_supervisor({ action: \"pending\" }) is empty, check intercom({ action: \"pending\" }) because an external intercom tool may own the request."
-		: "";
 	const attentionNote = relevantAttention.length > 0
-		? ` ${relevantAttention.length} run(s) need attention: ${relevantAttention.map((run) => run.id).join(", ")} —${supervisorAttentionHint} inspect with subagent({ action: "status" }) then steer a top-level live async child, resume a paused/completed/failed child, or interrupt explicitly.`
+		? ` ${relevantAttention.length} run(s) need attention: ${relevantAttention.map((run) => run.id).join(", ")} — inspect with subagent({ action: "status" }) then steer a top-level live async child, resume a paused/completed/failed child, or interrupt explicitly.`
 		: "";
 	const stillRunning = active.filter((run) => initialAsyncIds.has(run.id)).length
 		+ providerActive.filter((item) => initialProviderIds.has(backgroundWorkIdentity(item))).length;
@@ -837,10 +769,9 @@ export async function waitForSubagents(
 
 	if (waitForAll) {
 		const foregroundResult = !params.id && foreground.length > 0 && relevantAttention.length === 0
-			? await waitForSessionDetachedForegroundRuns(foreground, signal, deps, startedAt, now, pollIntervalMs, timeoutMs, supervisorYield)
+			? await waitForSessionDetachedForegroundRuns(foreground, signal, deps, startedAt, now, pollIntervalMs, timeoutMs)
 			: undefined;
 		if (foregroundResult?.isError) return foregroundResult;
-		if (foregroundResult?.details.wait?.reason === "supervisor_request") return foregroundResult;
 		if (foregroundResult?.details.wait?.reason === "window_elapsed") return foregroundResult;
 		const foregroundNote = foregroundResult
 			? `\n${foregroundResult.content.map((part) => part.type === "text" ? part.text : "").join("\n")}`
