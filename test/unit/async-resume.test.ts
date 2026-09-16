@@ -294,7 +294,6 @@ describe("async resume lookup", () => {
 				...descriptor,
 				launchContractDigest: "launch-contract-digest",
 				allowNestedSubagents: true,
-				intercomBridge: { mode: "off" },
 				extensionBindings: { "shepherd.dispatch/1": { role: "coder" } },
 				requiredExtensions: [{ id: "provider", path: path.join(root, "provider.mjs") }],
 			});
@@ -302,7 +301,6 @@ describe("async resume lookup", () => {
 			assert.equal(valid.launchContractDigest, "launch-contract-digest");
 			assert.equal(valid.recoveryDescriptor?.launchContractDigest, "launch-contract-digest");
 			assert.equal(valid.recoveryDescriptor?.allowNestedSubagents, true);
-			assert.deepEqual(valid.recoveryDescriptor?.intercomBridge, { mode: "off" });
 			assert.deepEqual(valid.recoveryDescriptor?.extensionBindings, { "shepherd.dispatch/1": { role: "coder" } });
 			assert.deepEqual(valid.recoveryDescriptor?.requiredExtensions, [{ id: "provider", path: path.join(root, "provider.mjs") }]);
 			assert.ok(Object.isFrozen(valid.recoveryDescriptor?.requiredExtensions));

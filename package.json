@@ -17,7 +17,6 @@
     "./required-child-extensions": "./src/api/required-child-extensions.ts",
     "./preflight": "./src/api/preflight.ts",
     "./control-channel": "./src/api/control-channel.ts",
-    "./intercom-bridge": "./src/api/intercom-bridge.ts",
     "./child-tool-plan": "./src/api/child-tool-plan.ts",
     "./shared-types": "./src/api/shared-types.ts",
     "./project-panes": "./src/api/project-panes.ts"

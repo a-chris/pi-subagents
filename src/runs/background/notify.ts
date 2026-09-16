@@ -211,7 +211,7 @@ function childStatus(child: CompletionChild, workflowState?: string): string {
 			? child.status
 		: undefined;
 	if (knownStatus) return knownStatus;
-	return child.stopped === true ? "stopped" : child.timedOut === true ? "failed" : child.interrupted === true ? "paused" : child.detached === true ? "detached" : child.success === true ? "complete" : "failed";
+	return child.stopped === true ? "stopped" : child.timedOut === true ? "failed" : child.interrupted === true ? "paused" : child.detached === true ? "detached" : child.success === true ? "completed" : "failed";
 }
 
 function structuredOutputText(value: unknown): string | undefined {

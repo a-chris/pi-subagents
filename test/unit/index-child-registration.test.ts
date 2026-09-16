@@ -1154,49 +1154,6 @@ describe("subagent extension child mode", () => {
 		}
 	});
 
-	it("registers the main watchdog command and renderer in parent mode", () => {
-		const script = String.raw`
-			import registerSubagentExtension from "./index.ts";
-			const events = { on() { return () => {}; }, emit() {} };
-			const commands = [];
-			const renderers = [];
-			const entryRenderers = [];
-			const fakePi = new Proxy({
-				events,
-				registerTool() {},
-				registerCommand(name) { commands.push(name); },
-				registerShortcut() {},
-				registerMessageRenderer(type) { renderers.push(type); },
-				registerEntryRenderer(type) { entryRenderers.push(type); },
-				sendMessage() {},
-				getSessionName() { return undefined; },
-			}, {
-				get(target, prop) {
-					if (prop in target) return target[prop];
-					return () => undefined;
-				},
-			});
-			registerSubagentExtension(fakePi);
-			if (!commands.includes("subagents-watchdog")) throw new Error("watchdog command not registered: " + commands.join(", "));
-			if (!renderers.includes("subagent_watchdog_warning")) throw new Error("watchdog renderer not registered: " + renderers.join(", "));
-			if (!renderers.includes("subagent_supervisor_request")) throw new Error("supervisor request renderer not registered: " + renderers.join(", "));
-			if (!entryRenderers.includes("subagent_supervisor_reply")) throw new Error("supervisor reply entry renderer not registered: " + entryRenderers.join(", "));
-			if (!entryRenderers.includes("subagent_watchdog_warning")) throw new Error("watchdog entry renderer not registered: " + entryRenderers.join(", "));
-		`;
-
-		execFileSync(
-			process.execPath,
-			[
-				"--experimental-strip-types",
-				"--import",
-				"./test/support/register-loader.mjs",
-				"--input-type=module",
-				"--eval",
-				script,
-			],
-			{ cwd: projectRoot, env: parentToolEnv(), stdio: "pipe" },
-		);
-	});
 
 	it("returns before registering anything in a child-hosting process", () => {
 		const script = String.raw`

@@ -1343,44 +1343,6 @@ describe("async run status inspection", () => {
 		}
 	});
 
-	it("keeps supervisor-detached workflow children out of generic revive guidance", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-workflow-detached-"));
-		try {
-			const asyncRoot = path.join(root, "runs");
-			const asyncDir = path.join(asyncRoot, "workflow-detached");
-			const sessionFile = path.join(root, "detached.jsonl");
-			fs.mkdirSync(asyncDir, { recursive: true });
-			fs.writeFileSync(sessionFile, "", "utf-8");
-			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
-				runId: "workflow-detached",
-				mode: "workflow",
-				state: "paused",
-				activityState: "needs_attention",
-				error: "Run 'detaches' detached for intercom coordination. Reply to the supervisor request first, then wait with bg_wait({ id: \"child-detached\" }). Use subagent({ action: \"status\", id: \"child-detached\" }) to recover the result; do not resume or launch a replacement while it remains detached.",
-				startedAt: 100,
-				lastUpdate: 200,
-				steps: [{
-					agent: "worker",
-					workflowKey: "detaches",
-					runId: "child-detached",
-					status: "paused",
-					activityState: "needs_attention",
-					sessionFile,
-				}],
-			}, null, 2), "utf-8");
-
-			const result = inspectSubagentStatus({ id: "workflow-detached" }, { asyncDirRoot: asyncRoot, resultsDir: path.join(root, "results") });
-			const text = textContent(result);
-			assert.match(text, /Reply to the supervisor request first/);
-			assert.match(text, /wait with bg_wait\(\{ id: "child-detached" \}\)/);
-			assert.match(text, /do not resume or launch a replacement while it remains detached/);
-			assert.match(text, /Recovery workflow child 'detaches'/);
-			assert.doesNotMatch(text, /Revive workflow child 'detaches'/);
-			assert.doesNotMatch(text, /action: "resume", id: "child-detached"/);
-		} finally {
-			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
 
 	it("uses original child indexes when result metadata contains invalid children", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-original-index-"));
@@ -1450,36 +1412,6 @@ describe("async run status inspection", () => {
 		}
 	});
 
-	it("shows expected intercom target for still-running async steps", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-intercom-"));
-		try {
-			const asyncRoot = path.join(root, "runs");
-			const asyncDir = path.join(asyncRoot, "run-live");
-			fs.mkdirSync(asyncDir, { recursive: true });
-			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
-				runId: "run-live",
-				mode: "single",
-				state: "running",
-				pid: 12345,
-				startedAt: 100,
-				lastUpdate: 100,
-				steps: [{ agent: "scout", status: "running", startedAt: 100 }],
-			}, null, 2), "utf-8");
-
-			const result = inspectSubagentStatus({ id: "run-live" }, {
-				asyncDirRoot: asyncRoot,
-				resultsDir: path.join(root, "results"),
-				kill: () => true,
-				now: () => 200,
-			});
-
-			const text = textContent(result);
-			assert.match(text, /Step 1: scout running/);
-			assert.match(text, /Intercom target: subagent-scout-run-live-1 \(if registered\)/);
-		} finally {
-			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
 
 	it("does not advertise a workflow steering command without a live foreground route", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-run-status-workflow-route-"));

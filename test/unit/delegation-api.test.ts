@@ -112,28 +112,6 @@ describe("public subagent delegation contract", () => {
 		}
 	});
 
-	it("accepts a per-launch intercomBridge override and forwards it to execution", () => {
-		const intercomBridge = { mode: "off" as const };
-		const parsed = parseSubagentDelegationRequest({ ...request, intercomBridge });
-		assert.equal(parsed.ok, true);
-		if (parsed.ok) {
-			assert.deepEqual(parsed.request.intercomBridge, intercomBridge);
-			assert.notEqual(parsed.request.intercomBridge, intercomBridge, "parsed request must not alias the caller's object");
-			assert.deepEqual(toSubagentDelegationExecutionParams(parsed.request).intercomBridge, intercomBridge);
-		}
-		assert.equal("intercomBridge" in toSubagentDelegationExecutionParams(request), false);
-		const malformed = [
-			[{ ...request, intercomBridge: { mode: "loud" } }, /intercomBridge\.mode is invalid/],
-			[{ ...request, intercomBridge: { extra: true } }, /intercomBridge\.extra is not supported/],
-			[{ ...request, intercomBridge: "off" }, /intercomBridge must be an object/],
-			[{ ...request, intercomBridge: { instructionFile: "x".repeat(1025) } }, /intercomBridge\.instructionFile exceeds 1 KiB/],
-		] as const;
-		for (const [input, expected] of malformed) {
-			const rejected = parseSubagentDelegationRequest(input);
-			assert.equal(rejected.ok, false);
-			if (!rejected.ok) assert.match(rejected.error, expected);
-		}
-	});
 
 	it("rejects non-JSON schemas without executing toJSON hooks", () => {
 		let calls = 0;

@@ -30,8 +30,6 @@ const flush = () => { for (const callback of [...callbacks.values()]) callback()
 assert.equal(await notifier.deliver(result("missing", { sessionId: undefined })), false);
 assert.equal(await notifier.deliver(result("foreground-other", { source: "foreground", sessionId: "other" })), false);
 assert.equal(await notifier.deliver(result("foreign", { completionOwnerId: "other" })), false);
-assert.equal(await notifier.deliver(result("relayed", { intercomDelivered: true })), true);
-assert.equal(sent.length, 0);
 const first = result("first");
 const firstDelivery = notifier.deliver(first);
 assert.equal(notifier.deliver(first), firstDelivery);
@@ -78,6 +76,7 @@ if (!process.env.NODE_DEBUG) {
 	Object.defineProperty(unread, "runId", { get() { throw new Error("diagnostic metadata read while disabled"); } });
 	assert.equal(await notifier.deliver(unread), false);
 }
+// SAFETY: the harness intentionally supplies a minimal structural pi stub; the assertion widens it to the documented API type.
 const immediate = registerSubagentNotify(pi as never, state, { batchConfig: { enabled: false } });
 assert.equal(await immediate.deliver(result("unbatched", { triggerTurn: false })), true);
 immediate.dispose();

@@ -723,7 +723,7 @@ export function inspectSubagentStatus(params: RunStatusParams, deps: RunStatusDe
 				}
 			}
 			const childStatuses = Array.isArray(data.results)
-				? data.results.map((child) => child.stopped === true ? "stopped" : child.timedOut === true ? "failed" : child.interrupted === true ? "paused" : child.exitCode === 0 ? "complete" : "failed")
+				? data.results.map((child) => child.stopped === true || child.processSignal ? "stopped" : child.timedOut === true ? "failed" : child.interrupted === true ? "paused" : child.exitCode === 0 ? "completed" : "failed")
 				: [];
 			const status = data.state === "stopped" || data.stopped === true || childStatuses.includes("stopped")
 				? "stopped"

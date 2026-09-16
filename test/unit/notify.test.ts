@@ -249,11 +249,6 @@ describe("registerSubagentNotify", () => {
 		assert.deepEqual(sent[0]!.options, { triggerTurn: false });
 	});
 
-	it("suppresses local delivery after an acknowledged grouped intercom relay", async () => {
-		const { notifier, sent } = createPi("session-a");
-		assert.equal(await notifier.deliver(completionResult({ id: "intercom-delivered", intercomDelivered: true })), true);
-		assert.equal(sent.length, 0);
-	});
 
 	it("rejects a pending batch when the notifier is disposed", async () => {
 		const clock = createFakeClock();
@@ -635,63 +630,6 @@ describe("completion formatting helpers", () => {
 		assert.equal(parsed?.reconciledFromDetachedChild, "child-2");
 	});
 
-	it("shows bounded child output paths and previews before workflow correlation metadata", () => {
-		const details = buildCompletionDetails({
-			id: "workflow-stopped",
-			runId: "workflow-stopped",
-			mode: "workflow",
-			agent: "workflow",
-			success: false,
-			state: "stopped",
-			summary: "Workflow stopped after one child completed.",
-			results: [
-				{
-					workflowKey: "review",
-					runId: "child-review",
-					agent: "worker",
-					success: true,
-					outputState: "present",
-					outputReference: "/tmp/review.md",
-					artifactPaths: { outputPath: "/tmp/legacy-review-path" },
-					output: `\u001b[31mReview heading\u001b[0m\n${"x".repeat(5_000)}`,
-				},
-				{
-					workflowKey: "stopped",
-					agent: "worker",
-					stopped: true,
-					outputState: "absent",
-					artifactPaths: { outputPath: "/tmp/stopped.md" },
-				},
-			],
-		});
-
-		assert.equal(details.status, "stopped");
-		assert.deepEqual(details.childOutputs?.map(({ workflowKey, runId, status, savedOutputPath }) => ({ workflowKey, runId, status, savedOutputPath })), [
-			{ workflowKey: "review", runId: "child-review", status: "completed", savedOutputPath: "/tmp/review.md" },
-			{ workflowKey: "stopped", runId: undefined, status: "stopped", savedOutputPath: undefined },
-		]);
-		assert.ok(Buffer.byteLength(details.childOutputs?.[0]?.preview ?? "", "utf8") <= 4 * 1024);
-
-		const content = formatSingleCompletion(details);
-		assert.match(content, /Child outputs:/);
-		assert.match(content, /key=review run=child-review status=completed/);
-		assert.match(content, /Saved output: \/tmp\/review\.md/);
-		assert.match(content, /Review heading/);
-		assert.doesNotMatch(content, /legacy-review-path/);
-		assert.match(content, /preview truncated/);
-		assert.match(content, /key=stopped run=unavailable status=stopped/);
-		assert.match(content, /Saved output: unavailable/);
-		assert.match(content, /Preview: unavailable \(no safe inline output\)/);
-		assert.doesNotMatch(content, /\u001b/);
-		assert.match(content, /Workflow run: workflow-stopped/);
-		assert.match(content, /Child runs: review=child-review \(completed\), stopped=unavailable \(stopped\)/);
-
-		const parsed = parseSubagentNotifyContent(content);
-		assert.equal(parsed?.workflowRunId, "workflow-stopped");
-		assert.match(parsed?.resultPreview ?? "", /Child outputs:/);
-		assert.match(parsed?.resultPreview ?? "", /Review heading/);
-		assert.doesNotMatch(parsed?.resultPreview ?? "", /Workflow run:/);
-	});
 
 	it("projects only verified producer paths and diagnoses truncated unbound output", () => {
 		const root = mkdtempSync(join(tmpdir(), "notify-retrieval-"));

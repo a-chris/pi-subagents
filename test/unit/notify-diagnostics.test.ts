@@ -25,7 +25,7 @@ it("traces bounded completion reasons through NODE_DEBUG without changing delive
 		return JSON.parse(line.slice(line.indexOf("{")));
 	});
 	assert.deepEqual([...new Set(records.map((row) => row.reason))].sort(), [
-		"missing_session", "foreground_session_mismatch", "not_owned", "intercom_delivered",
+		"missing_session", "foreground_session_mismatch", "not_owned",
 		"batch_deferred", "deduped_pending", "send_accepted", "deduped_ttl", "emit_not_owned",
 		"send_failed", "dispose_pending", "disposed",
 	].sort());

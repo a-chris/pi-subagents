@@ -81,7 +81,7 @@ describe("subagent control attention state", () => {
 		assert.equal(shouldNotifyControlEvent(config, event), true);
 		assert.equal(shouldNotifyControlEvent(config, activeEvent), true);
 		assert.deepEqual(config.notifyOn, ["active_long_running", "needs_attention"]);
-		assert.deepEqual(config.notifyChannels, ["event", "async", "intercom"]);
+		assert.deepEqual(config.notifyChannels, ["event", "async"]);
 	});
 
 	it("defaults active-long-running notices to elapsed time only", () => {
@@ -172,7 +172,7 @@ describe("subagent control attention state", () => {
 			activeNoticeAfterTokens: 8000,
 			failedToolAttemptsBeforeAttention: 4,
 			notifyOn: ["active_long_running", "needs_attention", "nope" as never],
-			notifyChannels: ["event", "intercom", "bad" as never],
+			notifyChannels: ["event", "bad" as never],
 		});
 		assert.equal(custom.needsAttentionAfterMs, 1234);
 		assert.equal(custom.activeNoticeAfterMs, 2345);
@@ -180,7 +180,7 @@ describe("subagent control attention state", () => {
 		assert.equal(custom.activeNoticeAfterTokens, 8000);
 		assert.equal(custom.failedToolAttemptsBeforeAttention, 4);
 		assert.deepEqual(custom.notifyOn, ["active_long_running", "needs_attention"]);
-		assert.deepEqual(custom.notifyChannels, ["event", "intercom"]);
+		assert.deepEqual(custom.notifyChannels, ["event"]);
 	});
 
 	it("falls back to defaults for invalid non-empty notification arrays", () => {
@@ -189,7 +189,7 @@ describe("subagent control attention state", () => {
 			notifyChannels: ["bogus" as never],
 		});
 		assert.deepEqual(custom.notifyOn, ["active_long_running", "needs_attention"]);
-		assert.deepEqual(custom.notifyChannels, ["event", "async", "intercom"]);
+		assert.deepEqual(custom.notifyChannels, ["event", "async"]);
 	});
 
 	it("allows empty notification arrays to disable notifications", () => {
@@ -206,14 +206,13 @@ describe("subagent control attention state", () => {
 	it("formats control notices with a proactive hint and concrete commands", () => {
 		const event = buildControlEvent({ to: "needs_attention", runId: "78f659a3", agent: "worker" });
 
-		const message = formatControlNoticeMessage(event, "subagent-worker-78f659a3");
+		const message = formatControlNoticeMessage(event);
 
 		assert.match(message, /Subagent needs attention: worker/);
 		assert.match(message, /Hint: Inspect status first unless the run is clearly blocked/);
 		assert.match(message, /steer for a top-level live async child, routed resume for a live nested child/);
 		assert.match(message, /Top-level live async nudge: subagent\(\{ action: "steer", id: "78f659a3", message: "What are you blocked on\?/);
 		assert.match(message, /Routed live nested nudge: subagent\(\{ action: "resume", id: "78f659a3", message: "What are you blocked on\?/);
-		assert.match(message, /Direct intercom target: subagent-worker-78f659a3/);
 		assert.match(message, /Status: subagent\(\{ action: "status", id: "78f659a3" \}\)/);
 		assert.match(message, /Interrupt: subagent\(\{ action: "interrupt", id: "78f659a3" \}\)/);
 		assert.doesNotMatch(message, /Wait:/);
@@ -231,7 +230,7 @@ describe("subagent control attention state", () => {
 			currentPath: "scripts/run-tests.sh",
 		});
 
-		const message = formatControlNoticeMessage(event, "subagent-worker-78f659a3");
+		const message = formatControlNoticeMessage(event);
 
 		assert.match(message, /worker has had tool 'bash' open for 240s/);
 		assert.match(message, /Facts: tool bash 240s \| path scripts\/run-tests\.sh/);
@@ -244,25 +243,11 @@ describe("subagent control attention state", () => {
 		const firstMessage = formatControlNoticeMessage(first);
 		const nudge = firstMessage.match(/message: ("(?:[^"\\]|\\.)*")/)?.[1];
 		assert.ok(nudge);
+		// SAFETY: the bounded nudge payload is validated JSON with a string body; the assertion narrows it for length checking.
 		assert.ok((JSON.parse(nudge) as string).length <= 160);
 		assert.notEqual(controlNotificationKey(first), controlNotificationKey(second));
 	});
 
-	it("formats supervisor-request notices with pending-channel guidance", () => {
-		const event = buildControlEvent({
-			to: "needs_attention",
-			runId: "78f659a3",
-			agent: "worker",
-			reason: "supervisor_request",
-			currentTool: "contact_supervisor",
-		});
-
-		const message = formatControlNoticeMessage(event, "subagent-worker-78f659a3");
-
-		assert.match(message, /Supervisor request: reply to the pending request/);
-		assert.match(message, /subagent_supervisor pending/);
-		assert.match(message, /intercom pending/);
-	});
 
 	it("formats active-long-running notices as informational", () => {
 		const event = buildControlEvent({
