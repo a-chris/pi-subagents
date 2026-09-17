@@ -2,6 +2,7 @@
 name: oracle
 aliases: advisor
 description: High-context decision-consistency oracle that protects inherited state and prevents drift
+advertise: true
 tools: read, grep, find, ls, bash
 thinking: high
 systemPromptMode: replace

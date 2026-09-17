@@ -63,12 +63,16 @@ it("emits bounded file-only snapshots, refreshes through management, and perform
 				return result;
 			};
 			refresh("startup");
-			noIo(() => { for (let i = 0; i < 20; i++) assert.equal(emit(), "base"); });
+			const builtin = noIo(() => emit());
+			assert.match(builtin, /<advertised_subagents>/);
+			assert.match(builtin, /<name>scout<\/name>/);
+			assert.match(builtin, /<name>worker<\/name>/);
+			noIo(() => { for (let i = 0; i < 20; i++) assert.equal(emit(), builtin); });
 			for (let i = 0; i < 250; i++) write("hidden-" + i, "hidden-" + i, "hidden", false);
 			refresh();
-			noIo(() => { for (let i = 0; i < 20; i++) assert.equal(emit(), "base"); });
+			noIo(() => { for (let i = 0; i < 20; i++) assert.equal(emit(), builtin); });
 			write("specialist", "specialist", "Original specialist");
-			assert.equal(noIo(() => emit()), "base", "external edits wait for reload");
+			assert.equal(noIo(() => emit()), builtin, "external edits wait for reload");
 			refresh();
 			let prompt = noIo(() => emit());
 			assert.match(prompt, /<name>specialist<\/name>/);
@@ -95,14 +99,14 @@ it("emits bounded file-only snapshots, refreshes through management, and perform
 			assert.match(fs.readFileSync(path.join(dir, "specialist.md"), "utf8"), /advertise: true/);
 			result = await manage({ action: "disable", agent: "specialist", agentScope: "user" });
 			assert.notEqual(result.isError, true, JSON.stringify(result));
-			assert.equal(noIo(() => emit(prompt)), "base");
+			assert.equal(noIo(() => emit(prompt)), builtin);
 			result = await manage({ action: "enable", agent: "specialist", agentScope: "user" });
 			assert.notEqual(result.isError, true, JSON.stringify(result));
 			prompt = noIo(() => emit());
 			assert.match(prompt, /Updated specialist/);
 			result = await manage({ action: "delete", agent: "specialist", agentScope: "user" });
 			assert.notEqual(result.isError, true, JSON.stringify(result));
-			assert.equal(noIo(() => emit(prompt)), "base");
+			assert.equal(noIo(() => emit(prompt)), builtin);
 			result = await manage({ action: "create", config: { name: "created", description: "Created specialist", systemPrompt: "Act narrowly.", scope: "user", advertise: true } });
 			assert.notEqual(result.isError, true, JSON.stringify(result));
 			assert.match(noIo(() => emit()), /<name>created<\/name>/);
@@ -113,7 +117,7 @@ it("emits bounded file-only snapshots, refreshes through management, and perform
 			assert.doesNotMatch(prompt, /<name>created<\/name>/);
 			result = await manage({ action: "update", agent: "renamed", config: { advertise: false } });
 			assert.notEqual(result.isError, true, JSON.stringify(result));
-			assert.equal(noIo(() => emit(prompt)), "base");
+			assert.equal(noIo(() => emit(prompt)), builtin);
 			// Inject a refresh-only read failure after the management file write has succeeded.
 			await manage({ action: "update", agent: "renamed", config: { advertise: true } });
 			prompt = noIo(() => emit());
@@ -153,7 +157,7 @@ it("emits bounded file-only snapshots, refreshes through management, and perform
 			for (const file of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, file));
 			assert.equal(noIo(() => emit()), prompt, "external removal waits for reload");
 			refresh();
-			assert.equal(noIo(() => emit(prompt)), "base");
+			assert.equal(noIo(() => emit(prompt)), builtin);
 			process.stdout.write("prompt contracts passed; zero prompt-time stat/readdir/readFile calls at 0, 250, and 277 definitions");
 		`], { cwd: root, env, encoding: "utf8", timeout: 60_000 });
 		assert.match(output, /prompt contracts passed/);

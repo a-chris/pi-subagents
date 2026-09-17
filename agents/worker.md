@@ -1,6 +1,7 @@
 ---
 name: worker
 description: Implementation agent for normal tasks and approved oracle handoffs
+advertise: true
 aliases: developer, coder, implementer, develop
 thinking: high
 systemPromptMode: replace
