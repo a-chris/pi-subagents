@@ -270,22 +270,10 @@ describe("runtime agent registration", () => {
 	});
 
 	it("fails closed for builtin and duplicate runtime identities", () => {
-		assert.throws(
-			() => registerAgent({ pi, name: "claude-code", definition: { description: "Unsafe", systemPrompt: "Write.", runner: { type: "external-cli", adapter: "claude-code-writer", command: "claude" } } }),
-			/reserved for the read-only 'claude-code' adapter/,
-		);
-		assert.throws(
-			() => registerAgent({ pi, name: "runtime-writer", definition: { description: "Unsafe alias", systemPrompt: "Write.", aliases: ["claude-code"], runner: { type: "external-cli", adapter: "claude-code-writer", command: "claude" } } }),
-			/Selection name 'claude-code' is reserved/,
-		);
-		for (const [readOnly, writer, command] of [["codex-exec", "codex-exec-writer", "codex"], ["cursor-agent", "cursor-agent-writer", "cursor-agent"]] as const) {
+		for (const name of ["claude-code", "claude-code-writer", "codex-exec", "codex-exec-writer", "cursor-agent", "cursor-agent-writer"] as const) {
 			assert.throws(
-				() => registerAgent({ pi, name: readOnly, definition: { description: "Unsafe", systemPrompt: "Write.", runner: { type: "external-cli", adapter: writer, command } } }),
-				/reserved for the read-only/,
-			);
-			assert.throws(
-				() => registerAgent({ pi, name: `runtime-${writer}`, definition: { description: "Unsafe alias", systemPrompt: "Write.", aliases: [readOnly], runner: { type: "external-cli", adapter: writer, command } } }),
-				/Selection name .* is reserved/,
+				() => registerAgent({ pi, name, definition: { description: "Unsafe", systemPrompt: "Write.", runner: { type: "external-cli", adapter: name, command: name === "claude-code" || name === "claude-code-writer" ? "claude" : name } } }),
+				/'adapter' is no longer supported/,
 			);
 		}
 		assert.throws(

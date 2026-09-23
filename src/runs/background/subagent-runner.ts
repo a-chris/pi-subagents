@@ -147,12 +147,7 @@ import { formatParallelHandoffError, formatParallelHandoffReference, parallelHan
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { acquireSessionLease, type SessionLeaseRequest } from "../shared/session-lease.ts";
 import { buildExternalCliPrompt, runExternalCli } from "../shared/external-cli-runner.ts";
-import { resolveClaudeCodeLaunch } from "../shared/claude-code-adapter.ts";
-import { resolveCodexExecLaunch } from "../shared/codex-exec-adapter.ts";
-import { resolveCursorAgentLaunch } from "../shared/cursor-agent-adapter.ts";
 import { resolveExternalCliRunnerStatus } from "../shared/external-cli-contract.ts";
-import { formatHerdrMachineHint, prepareHerdrMachineExternalCliRun } from "../shared/herdr-machine.ts";
-import { HerdrExternalNeedsAttentionError, createHerdrExternalAdapter, prepareInternalHerdrExternalAdapter, type HerdrExternalAdapterId, type HerdrExternalResult } from "../shared/herdr-external-adapters.ts";
 import { runExternalJob } from "../shared/external-job-runner.ts";
 import { createOrcaProgressTab, type OrcaProgressTab } from "../shared/orca-progress-tabs.ts";
 import type { ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
@@ -698,25 +693,6 @@ interface SingleStepContext {
 }
 
 /** Machine runs: a one-line hint for predictable remote failures, and a note that writer changes live on the machine. */
-function decorateHerdrMachineResult<T extends { output: string; exitCode: number | null; error?: string; externalProcess: { stderrPath: string } }>(result: T, machine: HerdrMachineReference, adapter: string | undefined): T {
-	let stderrTail = "";
-	try {
-		const stderr = fs.readFileSync(result.externalProcess.stderrPath, "utf-8");
-		stderrTail = stderr.slice(-4096);
-	} catch { /* stderr log is best-effort evidence. */ }
-	const hint = result.exitCode === 0 ? undefined : formatHerdrMachineHint(machine, `${result.error ?? ""}\n${stderrTail}\nexit code ${result.exitCode}`);
-	const error = hint ? `${result.error ?? `Remote command exited with code ${result.exitCode}.`}\n${hint}` : result.error;
-	const note = result.exitCode === 0 && adapter?.endsWith("-writer") ? `Changes made by this run live on ${machine.label ?? machine.id} at ${machine.cwd}; the local checkout is unchanged.` : undefined;
-	const output = note ? (result.output.trim() ? `${result.output.trimEnd()}\n\n${note}` : note) : result.output;
-	return { ...result, output, ...(error !== undefined ? { error } : {}) };
-}
-
-export async function settleHerdrExternalRunnerError(error: unknown, adapter: HerdrExternalAdapterId, evidence: Parameters<ReturnType<typeof createHerdrExternalAdapter>["normalize"]>[0], retain: () => Promise<void>): Promise<HerdrExternalResult> {
-	await retain();
-	if (!(error instanceof HerdrExternalNeedsAttentionError)) throw error;
-	return createHerdrExternalAdapter(adapter).normalize(evidence, error.message);
-}
-
 export async function runSingleStepInner(
 	step: SubagentStep,
 	ctx: SingleStepContext,
@@ -882,71 +858,19 @@ export async function runSingleStepInner(
 			const message = stopped ? ctx.stopMessage ?? "Subagent stopped by user." : ctx.timeoutMessage ?? "Subagent timed out.";
 			return omitUndefinedProperties({ agent: step.agent, context: step.context, output: message, error: message, exitCode: 1, stopped: stopped || undefined, timedOut: stopped ? undefined : true });
 		}
-		if (step.machine) {
-			const runner = resolveExternalCliRunnerStatus({ ...step.runner, machine: step.machine });
-			const outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
-			const placedRunId = `${ctx.id}-${ctx.flatIndex}`;
-			const session = await prepareInternalHerdrExternalAdapter({ adapter: step.runner.adapter as HerdrExternalAdapterId, machine: step.machine, runId: placedRunId }, {});
-			let timedOut = false, stopped = false, retain = false;
-			const evidenceInput = { runId: placedRunId, requestId: `prompt-${ctx.flatIndex}`, task: buildExternalCliPrompt(step.systemPrompt ?? "", task), cwd: externalCwd, nativeSessionId: session.launch.nativeSessionId };
-			let resolveInterruption!: (value: "timeout" | "stop") => void, rejectInterruption!: (error: unknown) => void;
-			const interruption = new Promise<"timeout" | "stop">((resolve, reject) => { resolveInterruption = resolve; rejectInterruption = reject; });
-			ctx.registerTimeout?.(() => { timedOut = true; retain = true; resolveInterruption("timeout"); });
-			ctx.registerStop?.(() => { stopped = true; void session.abort().then(() => resolveInterruption("stop"), rejectInterruption); });
-			try {
-				let settled: HerdrExternalResult;
-				try {
-					const raced = await Promise.race([session.promptAndSettle(evidenceInput).then((value) => ({ kind: "settled" as const, value })), interruption.then((kind) => ({ kind }))]);
-					if (raced.kind === "settled") settled = raced.value;
-					else if (raced.kind === "timeout") settled = createHerdrExternalAdapter(step.runner.adapter as HerdrExternalAdapterId).normalize(evidenceInput, "Placed external run timed out; truthful pane retained for inspection.");
-					else return { agent: step.agent, context: step.context, output: "Placed external run stopped by user.", outputState: "present", exitCode: 1, stopped: true, runner, execution: { status: "stopped", success: false, exitCode: 1, stopped: true } };
-				} catch (error) {
-					retain = true;
-					settled = await settleHerdrExternalRunnerError(error, step.runner.adapter as HerdrExternalAdapterId, evidenceInput, () => session.retain());
-				}
-				const output = settled.output;
-				try { fs.writeFileSync(ctx.outputFile, output, "utf-8"); } catch { /* Observability output is best-effort. */ }
-				const resolvedOutput = step.outputPath ? resolveSingleOutput(step.outputPath, output, outputSnapshot, step.outputClaimPath) : { fullOutput: output };
-				const outputReference = resolvedOutput.savedPath ? formatSavedOutputReference(resolvedOutput.savedPath, resolvedOutput.fullOutput) : undefined;
-				const finalizedOutput = finalizeSingleOutput(omitUndefinedProperties({ fullOutput: resolvedOutput.fullOutput, outputPath: step.outputPath, outputMode: step.outputMode, exitCode: 1, preserveSavedOutput: true, savedPath: resolvedOutput.savedPath, outputReference, saveError: resolvedOutput.saveError }));
-				const artifactErrors = artifactPaths && ctx.artifactConfig?.enabled !== false ? persistStepArtifacts({ artifactPaths, artifactConfig: ctx.artifactConfig, output: formatOutputArtifactContent(omitUndefinedProperties({ output: resolvedOutput.fullOutput, metadataPath: ctx.artifactConfig?.includeMetadata === false ? undefined : artifactPaths.metadataPath })), metadata: { runId: ctx.id, agent: step.agent, task: PROMPT_REDACTED, runner, placement: session.owner.identity, settlement: settled.settlement, outcome: settled.outcome, timestamp: Date.now() } }) : {};
-				return omitUndefinedProperties({ agent: step.agent, ...(childSessionName ? { sessionName: childSessionName } : {}), context: step.context, output: finalizedOutput.displayOutput, outputState: output.trim() ? "present" : "absent", exitCode: 1, error: resolvedOutput.fatalError ? resolvedOutput.saveError : undefined, timedOut, stopped, artifactPaths, outputSaveError: [resolvedOutput.saveError, artifactErrors.outputSaveError].filter(Boolean).join("\n") || undefined, metadataSaveError: artifactErrors.metadataSaveError, runner, execution: { status: "partial", success: false, exitCode: 1 } });
-			} catch (error) {
-				// Any post-allocation uncertainty retains the pane; only explicit stop
-				// and successful exact settlement are destructive.
-				retain = true;
-				throw error;
-			} finally {
-				ctx.registerTimeout?.(undefined); ctx.registerStop?.(undefined);
-				if (retain) await session.retain(); else await session.dispose();
-			}
-		}
-		const adapterLaunch = step.runner.adapter === "codex-exec" || step.runner.adapter === "codex-exec-writer"
-			? resolveCodexExecLaunch({ adapter: step.runner.adapter, command: step.runner.command, asyncDir: path.dirname(ctx.outputFile), stepIndex: ctx.flatIndex })
-			: step.runner.adapter === "claude-code" || step.runner.adapter === "claude-code-writer"
-				? resolveClaudeCodeLaunch({ adapter: step.runner.adapter, command: step.runner.command })
-				: step.runner.adapter === "cursor-agent" || step.runner.adapter === "cursor-agent-writer"
-					? resolveCursorAgentLaunch({ adapter: step.runner.adapter, command: step.runner.command, cwd: externalCwd, asyncDir: path.dirname(ctx.outputFile), stepIndex: ctx.flatIndex })
-				: undefined;
-		const runner = resolveExternalCliRunnerStatus({ ...step.runner, ...(adapterLaunch ? { args: adapterLaunch.args } : {}), ...(step.machine ? { machine: step.machine } : {}) });
+		const runner = resolveExternalCliRunnerStatus({ ...step.runner });
 		const outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
 		const onExternalOutput = (chunk: Buffer): void => {
 			if (chunk.length > 0) ctx.onExternalStreamActivity?.();
 			ctx.orcaProgressTab?.append(chunk.toString("utf-8"));
 		};
 		const externalInput = omitUndefinedProperties({
-			command: adapterLaunch?.command ?? runner.command,
-			args: adapterLaunch?.args ?? runner.args,
+			command: runner.command,
+			args: runner.args,
 			cwd: externalCwd,
 			prompt: buildExternalCliPrompt(step.systemPrompt ?? "", task),
 			asyncDir: path.dirname(ctx.outputFile),
 			stepIndex: ctx.flatIndex,
-			environment: adapterLaunch?.environment,
-			preflight: adapterLaunch?.preflight,
-			parser: adapterLaunch?.parser,
-			finalOutputPath: adapterLaunch?.finalOutputPath,
-			promptFilePath: adapterLaunch?.promptFilePath,
-			temporaryDirectories: adapterLaunch?.temporaryDirectories,
 			registerTimeout: ctx.registerTimeout,
 			registerStop: ctx.registerStop,
 			timeoutMessage: ctx.timeoutMessage,
@@ -955,10 +879,9 @@ export async function runSingleStepInner(
 			onStdout: onExternalOutput,
 			onStderr: onExternalOutput,
 		});
-		const preparedExternal = prepareHerdrMachineExternalCliRun(externalInput, step.machine ? { machine: step.machine, ...(step.machineEnv ? { env: step.machineEnv } : {}) } : undefined, { localCwd: ctx.cwd });
-		const ran = await runExternalCli(preparedExternal.input);
-		const externalProcess = preparedExternal.decorateProcess(ran.externalProcess);
-		const external = step.machine ? decorateHerdrMachineResult(ran, step.machine, step.runner.adapter) : ran;
+		const ran = await runExternalCli(externalInput);
+		const externalProcess = ran.externalProcess;
+		const external = ran;
 		try { fs.writeFileSync(ctx.outputFile, external.output, "utf-8"); } catch { /* Observability output is best-effort. */ }
 		const resolvedOutput = step.outputPath && external.exitCode === 0
 			? resolveSingleOutput(step.outputPath, external.output, outputSnapshot, step.outputClaimPath)
@@ -1095,7 +1018,7 @@ export async function runSingleStepInner(
 	let toolBudget = step.toolBudget ? initialToolBudgetState(step.toolBudget) : undefined;
 	let toolBudgetBlocked = false;
 	let actualLaunchContractDigest = step.launchContractDigest;
-	const mutationSnapshot = step.machine ? { source: "tracked-files" as const, trackedOnly: true as const, cwd: step.cwd ?? ctx.cwd, dirtyFiles: [], fingerprints: {}, unavailable: "Local Git evidence is not authoritative for a pane-native remote run." } : snapshotTrackedMutations(step.cwd ?? ctx.cwd);
+	const mutationSnapshot = snapshotTrackedMutations(step.cwd ?? ctx.cwd);
 	let finalMutationEvidence = collectTrackedMutationEvidence(mutationSnapshot, step.cwd ?? ctx.cwd);
 
 	let contextOverflow = false;

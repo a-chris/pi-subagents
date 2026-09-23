@@ -1,18 +1,16 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExternalProcessStatus, HerdrMachineReference } from "../../shared/types.ts";
+import type { HerdrMachineReference } from "../../shared/types.ts";
 import { getAgentDir, getProjectConfigDir } from "../../shared/utils.ts";
-import { CODE_OWNED_EXTERNAL_CLI_ADAPTER_IDS, type CodeOwnedExternalCliAdapterId } from "./external-cli-contract.ts";
-import type { runExternalCli } from "./external-cli-runner.ts";
 export { shellQuoteRemote as shellQuote } from "./herdr-connection.ts";
 
 /**
  * Herdr saved-machine placement for external CLI children.
  *
  * Herdr owns which machines exist and how ssh reaches them (`herdr machine list --json`).
- * pi-subagents owns what runs there: native Pi and the six code-owned external profiles are
- * launched in fresh Herdr-owned visible panes. SSH is bounded transport and never owns the agent.
+ * pi-subagents owns what runs there: native Pi children are launched in fresh Herdr-owned
+ * visible panes. SSH is bounded transport and never owns the agent.
  * `cwd` means the directory on that machine; the remote `cd` is the directory check.
  */
 
@@ -20,11 +18,8 @@ const MAX_MACHINE_NAME_LENGTH = 128;
 const HERDR_MACHINE_LIST_TIMEOUT_MS = 7_500;
 const MAX_HERDR_MACHINE_LIST_BYTES = 1024 * 1024;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/u;
-const SUPPORTED_MACHINE_ADAPTERS = new Set<string>(CODE_OWNED_EXTERNAL_CLI_ADAPTER_IDS);
 /** The local ssh process gets only what ssh itself needs; remote runs use the machine's own credentials. */
 export const HERDR_SSH_ENV_ALLOWLIST = ["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "SSH_AUTH_SOCK"] as const;
-
-type RunExternalCliInput = Parameters<typeof runExternalCli>[0];
 
 interface HerdrMachineCatalogEntry {
 	id: string;
@@ -58,11 +53,6 @@ export interface HerdrMachinePlacement {
 	machine: HerdrMachineReference;
 	/** Opt-in `subagents.machines.<name>.env`, exported in front of the remote command. */
 	env?: Record<string, string>;
-}
-
-export interface PreparedHerdrMachineExternalCliRun {
-	input: RunExternalCliInput;
-	decorateProcess(process: ExternalProcessStatus): ExternalProcessStatus;
 }
 
 function validateMachineName(value: string): string {
@@ -204,7 +194,6 @@ function findProjectRootForSettings(cwd: string): string {
 		current = parent;
 	}
 }
-
 export function resolveHerdrMachinePlacement(input: ResolveHerdrMachinePlacementInput): HerdrMachinePlacement {
 	const requested = validateMachineName(input.machine);
 	const catalog = input.catalogJson !== undefined
@@ -239,26 +228,20 @@ export function formatHerdrMachineRunnerUnsupported(input: {
 	machine?: string;
 	agentName: string;
 	runnerType?: string;
-	adapter?: string;
 	worktree?: boolean;
 }): string | undefined {
 	if (input.machine === undefined) return undefined;
 	if (input.runnerType !== undefined && input.runnerType !== "pi" && input.runnerType !== "external-cli") {
-		return `Agent '${input.agentName}' requested machine '${input.machine}', but this runner cannot use pane-native Herdr placement. Use native Pi or a built-in Claude, Codex, or Cursor profile.`;
+		return `Agent '${input.agentName}' requested machine '${input.machine}', but this runner cannot use pane-native Herdr placement. Use native Pi for saved-machine runs.`;
 	}
-	if (input.runnerType === "external-cli" && (input.adapter === undefined || !SUPPORTED_MACHINE_ADAPTERS.has(input.adapter))) {
-		return `Agent '${input.agentName}' requested machine '${input.machine}', but generic external-cli commands cannot be remote-wrapped safely. Use claude-code, claude-code-writer, codex-exec, codex-exec-writer, cursor-agent, or cursor-agent-writer.`;
+	if (input.runnerType === "external-cli") {
+		return `Agent '${input.agentName}' requested machine '${input.machine}', but external-cli commands run locally and cannot be placed on a Herdr machine. Use a native Pi child for saved-machine runs.`;
 	}
 	if (input.worktree === true) return `Agent '${input.agentName}' requested machine '${input.machine}', but managed worktrees are local git operations and cannot be combined with a Herdr saved machine.`;
 	if (process.platform === "win32") return "Herdr saved-machine pane transport requires hardened OpenSSH StreamLocal forwarding, which is not supported from a Windows host yet.";
 	return undefined;
 }
 
-/** Legacy local-child SSH wrapping is intentionally unavailable after the pane-native cut-over. */
-export function prepareHerdrMachineExternalCliRun(input: RunExternalCliInput, placement: HerdrMachinePlacement | undefined, _options: { localCwd: string }): PreparedHerdrMachineExternalCliRun {
-	if (placement) throw new Error("Saved-machine external profiles must run in a Herdr-owned pane.");
-	return { input, decorateProcess: (process) => process };
-}
 const HINTS: ReadonlyArray<readonly [RegExp, (machine: HerdrMachineReference) => string]> = [
 	[/Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|Permission denied \(publickey|Permission denied, please try again|No such identity|Could not resolve hostname|Connection (timed out|refused)/iu,
 		(machine) => `ssh could not reach or authenticate with ${machine.target}. Connect once interactively with ssh ${machine.target} to accept the host key or fix the identity; BatchMode never prompts.`],

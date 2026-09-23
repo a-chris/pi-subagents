@@ -274,7 +274,7 @@ Review carefully.`.replace(" description:", "description:"));
 		assert.deepEqual(discoverAgents(project, "project").agents.find((agent) => agent.name === "external")?.runner, external.runner);
 	}));
 
-	it("keeps external-cli stop code-owned while refusing capability widening", () => withTempHome(() => {
+	it("keeps external-cli caps fixed while refusing capability widening", () => withTempHome(() => {
 		const project = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagents-runner-capabilities-"));
 		tempDirs.push(project);
 		const agentPath = path.join(project, ".pi", "agents", "external.md");
@@ -293,7 +293,7 @@ Review carefully.`.replace(" description:", "description:"));
 		writeAgent(agentPath, `---\nname: external\ndescription: External runner\nrunner:\n  type: external-cli\n  command: node\n  capabilities:\n    steer: true\n---\nReview.`);
 		const widened = discoverAgents(project, "project");
 		assert.equal(widened.agents.some((agent) => agent.name === "external"), false);
-		assert.match(widened.agentDiagnostics?.[0]?.error ?? "", /steer may only be false; user config cannot widen code-owned external adapter capabilities/);
+		assert.match(widened.agentDiagnostics?.[0]?.error ?? "", /steer may only be false; the generic external-cli runner already caps these capabilities/);
 	}));
 
 	it("parses and serializes an external-job runner", () => withTempHome(() => {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Removed the vendored CLI executor profiles.** The bundled `claude-code`, `claude-code-writer`, `codex-exec`, `codex-exec-writer`, `cursor-agent`, and `cursor-agent-writer` agents and their adapter machinery (JSONL parsers, preflight specs, Herdr pane-native placement) were deleted. The generic `external-cli` runner remains: any agent can declare `runner: { type: external-cli, command, args }` and the runner pipes the prompt to the command's stdin. Herdr saved-machine placement now accepts native Pi children only.
+
 - **Removed parent↔child messaging.** The intercom/supervisor channel is gone: `contact_supervisor`/`subagent_supervisor` tools, the `intercomBridge` config and bridge prompt, result-intercom delivery, and pending-supervisor wait/auto-drain barriers were deleted. Subagents run one-shot and report back; a child that cannot safely complete returns `BLOCKED: <reason>` as a terminal completion status (`blocked` on the result and execution projection).
 
 ## [Unreleased]

@@ -42,7 +42,7 @@ describe("async runner execution", () => {
 			else process.env.HERDR_BIN = previousHerdrBin;
 			fs.rmSync(bin, { recursive: true, force: true });
 		});
-		const external = { ...agent("external"), machine: "agent-pin", runner: { type: "external-cli" as const, adapter: "codex-exec" as const, command: "codex" } };
+		const external = { ...agent("external"), machine: "agent-pin" };
 		const built = buildAsyncRunnerSteps("parallel-machine", {
 			chain: [{ machine: "workmac", parallel: [{ agent: "external", task: "Review", cwd: "/remote/repo" }] }],
 			agents: [external],

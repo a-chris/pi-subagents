@@ -305,7 +305,6 @@ description: Remote external CLI
 machine: workmac
 runner:
   type: external-cli
-  adapter: codex-exec
   command: codex
 ---
 Remote.
@@ -335,52 +334,29 @@ Remote.
 		}
 	});
 
-	it("rejects management attempts to widen the reserved read-only Claude profile", () => {
+	it("rejects removed code-owned adapters while allowing plain external-cli runners", () => {
 		const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-		const writerRunner = { type: "external-cli", adapter: "claude-code-writer", command: "claude" };
-		const unsafeCreate = handleCreate({ config: { name: "claude-code", description: "Unsafe shadow", scope: "project", runner: writerRunner } }, ctx);
+		const unsafeCreate = handleCreate({ config: { name: "claude-code", description: "Unsafe shadow", scope: "project", runner: { type: "external-cli", adapter: "claude-code-writer", command: "claude" } } }, ctx);
 		assert.equal(unsafeCreate.isError, true);
-		assert.match(readText(unsafeCreate), /reserved for the read-only 'claude-code' adapter/);
-		const unsafeLocalName = handleCreate({ config: { name: "claude-code", package: "custom", description: "Unsafe local name", scope: "project", runner: writerRunner } }, ctx);
-		assert.equal(unsafeLocalName.isError, true);
-		assert.match(readText(unsafeLocalName), /Selection name 'claude-code' is reserved/);
-		const unsafeAlias = handleCreate({ config: { name: "aliased-writer", aliases: ["claude-code"], description: "Unsafe alias", scope: "project", runner: writerRunner } }, ctx);
-		assert.equal(unsafeAlias.isError, true);
-		assert.match(readText(unsafeAlias), /Selection name 'claude-code' is reserved/);
-
-		const readOnlyCreate = handleCreate({ config: { name: "claude-code", description: "Narrow shadow", scope: "project", runner: { type: "external-cli", adapter: "claude-code", command: "claude" } } }, ctx);
-		assert.equal(readOnlyCreate.isError, false);
-		const unsafeUpdate = handleUpdate({ agent: "claude-code", agentScope: "project", config: { runner: writerRunner } }, ctx);
+		assert.match(readText(unsafeCreate), /config\.runner must be .*type: 'external-cli'/);
+		const plainCreate = handleCreate({ config: { name: "claude-code", description: "Plain external runner", scope: "project", runner: { type: "external-cli", command: "claude" } } }, ctx);
+		assert.equal(plainCreate.isError, false);
+		assert.match(fs.readFileSync(path.join(tempDir, ".pi", "agents", "claude-code.md"), "utf-8"), /runner:\n  type: external-cli\n  command: claude/);
+		const unsafeUpdate = handleUpdate({ agent: "claude-code", agentScope: "project", config: { runner: { type: "external-cli", adapter: "claude-code", command: "claude" } } }, ctx);
 		assert.equal(unsafeUpdate.isError, true);
-		assert.match(readText(unsafeUpdate), /reserved for the read-only 'claude-code' adapter/);
-		assert.match(fs.readFileSync(path.join(tempDir, ".pi", "agents", "claude-code.md"), "utf-8"), /adapter: claude-code\n/);
-
-		const writerCreate = handleCreate({ config: { name: "custom-writer", description: "Writer", scope: "project", runner: writerRunner } }, ctx);
-		assert.equal(writerCreate.isError, false);
-		const unsafeAliasUpdate = handleUpdate({ agent: "custom-writer", agentScope: "project", config: { aliases: ["claude-code"] } }, ctx);
-		assert.equal(unsafeAliasUpdate.isError, true);
-		assert.match(readText(unsafeAliasUpdate), /Selection name 'claude-code' is reserved/);
-		const unsafeRename = handleUpdate({ agent: "custom-writer", agentScope: "project", config: { name: "claude-code" } }, ctx);
-		assert.equal(unsafeRename.isError, true);
-		assert.match(readText(unsafeRename), /reserved for the read-only 'claude-code' adapter/);
+		assert.match(readText(unsafeUpdate), /config\.runner must be .*type: 'external-cli'/);
+		assert.equal(handleUpdate({ agent: "claude-code", agentScope: "project", config: { aliases: ["claude-writer"] } }, ctx).isError, false);
 	});
 
-	it("rejects create, update, alias, and rename widening for Codex and Cursor", () => {
+	it("no longer reserves the removed vendor identities for create and rename", () => {
 		const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-		for (const [readOnly, writer, command] of [["codex-exec", "codex-exec-writer", "codex"], ["cursor-agent", "cursor-agent-writer", "cursor-agent"]] as const) {
-			const writerRunner = { type: "external-cli", adapter: writer, command };
-			assert.equal(handleCreate({ config: { name: readOnly, description: "Unsafe shadow", scope: "project", runner: writerRunner } }, ctx).isError, true);
-			assert.equal(handleCreate({ config: { name: readOnly, package: `custom-${readOnly}`, description: "Unsafe local name", scope: "project", runner: writerRunner } }, ctx).isError, true);
-			assert.equal(handleCreate({ config: { name: `${readOnly}-alias`, aliases: [readOnly], description: "Unsafe alias", scope: "project", runner: writerRunner } }, ctx).isError, true);
-
-			const readOnlyCreate = handleCreate({ config: { name: readOnly, description: "Narrow shadow", scope: "project", runner: { type: "external-cli", adapter: readOnly, command } } }, ctx);
-			assert.equal(readOnlyCreate.isError, false);
-			assert.equal(handleUpdate({ agent: readOnly, agentScope: "project", config: { runner: writerRunner } }, ctx).isError, true);
-
-			const customName = `custom-${writer}`;
-			assert.equal(handleCreate({ config: { name: customName, description: "Writer", scope: "project", runner: writerRunner } }, ctx).isError, false);
-			assert.equal(handleUpdate({ agent: customName, agentScope: "project", config: { aliases: [readOnly] } }, ctx).isError, true);
-			assert.equal(handleUpdate({ agent: customName, agentScope: "project", config: { name: readOnly } }, ctx).isError, true);
+		for (const name of ["codex-exec", "codex-exec-writer", "cursor-agent", "cursor-agent-writer"] as const) {
+			const withAdapter = handleCreate({ config: { name, description: "Shadow", scope: "project", runner: { type: "external-cli", adapter: name, command: "codex" } } }, ctx);
+			assert.equal(withAdapter.isError, true);
+			assert.match(readText(withAdapter), /config\.runner must be .*type: 'external-cli'/);
+			const plain = handleCreate({ config: { name, description: "Plain", scope: "project", runner: { type: "external-cli", command: "codex" } } }, ctx);
+			assert.equal(plain.isError, false);
+			assert.equal(handleUpdate({ agent: name, agentScope: "project", config: { name: `renamed-${name}` } }, ctx).isError, false);
 		}
 	});
 

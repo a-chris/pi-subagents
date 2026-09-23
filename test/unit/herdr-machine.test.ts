@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
 	formatHerdrMachineHint,
 	formatHerdrMachineRunnerUnsupported,
-	prepareHerdrMachineExternalCliRun,
 	resolveHerdrMachinePlacement,
 	shellQuote,
 } from "../../src/runs/shared/herdr-machine.ts";
@@ -122,24 +121,20 @@ describe("Herdr machine placement", () => {
 	});
 
 	describe("launch gating", () => {
-		it("allows native Pi but rejects generic adapters and worktrees with a pointer", () => {
+		it("allows native Pi but rejects external-cli and worktrees with a pointer", () => {
 			if (process.platform !== "win32") assert.equal(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "reviewer", runnerType: "pi" }), undefined);
-			assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "generic", runnerType: "external-cli" }) ?? "", /generic external-cli commands cannot be remote-wrapped/u);
-			assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "external-cli", adapter: "claude-code", worktree: true }) ?? "", /managed worktrees are local git operations/u);
+			assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "generic", runnerType: "external-cli" }) ?? "", /external-cli commands run locally and cannot be placed on a Herdr machine/u);
+			assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "external-cli", worktree: true }) ?? "", /external-cli commands run locally/u);
+			assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "pi", worktree: true }) ?? "", /managed worktrees are local git operations/u);
 			assert.equal(formatHerdrMachineRunnerUnsupported({ agentName: "reviewer", runnerType: "pi" }), undefined);
 			if (process.platform === "win32") {
-				assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "external-cli", adapter: "claude-code" }) ?? "", /Windows host/u);
+				assert.match(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "pi" }) ?? "", /Windows host/u);
 			} else {
-				assert.equal(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "external-cli", adapter: "claude-code-writer" }), undefined);
+				assert.equal(formatHerdrMachineRunnerUnsupported({ machine: "workmac", agentName: "worker", runnerType: "pi" }), undefined);
 			}
 		});
 	});
 
-	describe("pane-native cut-over", () => {
-		it("rejects the removed local-child SSH wrapper for saved-machine runs", () => {
-			assert.throws(() => prepareHerdrMachineExternalCliRun({ command: "claude", cwd: "/local", prompt: "x", asyncDir: tempProject, stepIndex: 0 }, { machine }, { localCwd: "/local" }), /must run in a Herdr-owned pane/u);
-		});
-	});
 	describe("hints", () => {
 		for (const [text, pattern] of [
 			["ssh: connect to host 100.82.67.118 port 22: Connection timed out", /Connect once interactively with ssh 100\.82\.67\.118/u],

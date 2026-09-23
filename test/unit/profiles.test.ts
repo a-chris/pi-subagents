@@ -100,20 +100,20 @@ describe("profiles helpers", () => {
 		const profilesDir = getSubagentProfilesDir();
 		fs.mkdirSync(profilesDir, { recursive: true });
 		fs.writeFileSync(path.join(profilesDir, "quota.json"), JSON.stringify({
-			subagents: { agentOverrides: { scout: { model: "openai-codex/gpt-5.3-codex-spark" }, "claude-code": { thinking: false } } },
+			subagents: { agentOverrides: { scout: { model: "openai-codex/gpt-5.3-codex-spark" }, reviewer: { thinking: false } } },
 		}, null, 2));
 		const settingsPath = path.join(homeDir, ".pi", "agent", "settings.json");
 		fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
 		fs.writeFileSync(settingsPath, JSON.stringify({
-			subagents: { agentOverrides: { "claude-code": { machine: "workmac", model: "old" }, "codex-exec": { machine: "workmac" }, stale: { model: "remove-me" } } },
+			subagents: { agentOverrides: { reviewer: { machine: "workmac", model: "old" }, worker: { machine: "workmac" }, stale: { model: "remove-me" } } },
 		}, null, 2));
 
 		applySubagentProfile("quota");
 		const written = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
 		assert.deepEqual(written.subagents.agentOverrides, {
 			scout: { model: "openai-codex/gpt-5.3-codex-spark" },
-			"claude-code": { thinking: false, machine: "workmac" },
-			"codex-exec": { machine: "workmac" },
+			reviewer: { thinking: false, machine: "workmac" },
+			worker: { machine: "workmac" },
 		});
 	});
 
