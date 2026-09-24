@@ -54,7 +54,7 @@ export interface SubagentLaunchContractInput {
 	cwd: string;
 	task?: string;
 	agentScope?: AgentScope;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	model?: string;
 	fast?: boolean;
 	thinking?: string | false;
@@ -157,7 +157,7 @@ export interface SubagentLaunchContract {
 	version: typeof SUBAGENT_LAUNCH_CONTRACT_VERSION;
 	runId: string;
 	agent: SubagentLaunchContractAgent;
-	context: "fresh" | "fork";
+	context: "fresh" | "fork" | "summary";
 	model?: string;
 	thinking?: string;
 	thinkingCeiling?: ThinkingLevel;
@@ -184,7 +184,13 @@ export type SubagentLaunchContractResult =
 
 function packageVersion(): string {
 	const packagePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "package.json");
-	const parsed = JSON.parse(fs.readFileSync(packagePath, "utf-8")) as { version?: unknown };
+	let parsed: { version?: unknown };
+	try {
+		parsed = JSON.parse(fs.readFileSync(packagePath, "utf-8"));
+	} catch (error) {
+		const cause = error instanceof Error ? error : new Error(String(error));
+		throw new Error(`Invalid package.json at '${packagePath}': ${cause.message}`, { cause });
+	}
 	if (typeof parsed.version !== "string" || !parsed.version.trim()) {
 		throw new Error(`Invalid package version in '${packagePath}'.`);
 	}
@@ -199,7 +205,7 @@ function normalizeAvailableModels(models: SubagentLaunchContractInput["available
 	return (models ?? []).map((model) => ({ ...model, fullId: model.fullId ?? `${model.provider}/${model.id}` }));
 }
 
-function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent: AgentConfig): "fresh" | "fork" {
+function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent: AgentConfig): "fresh" | "fork" | "summary" {
 	return resolveSubagentLaunchContext({
 		explicitContext: input.context,
 		agentDefaultContext: agent.defaultContext,
@@ -256,8 +262,8 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		const detail = error instanceof Error ? ` ${error.message}` : "";
 		return { ok: false, code: "invalid_cwd", message: `cwd '${effectiveCwd}' is not a directory.${detail}`, diagnostics };
 	}
-	if (input.context !== undefined && input.context !== "fresh" && input.context !== "fork") {
-		return { ok: false, code: "unsupported_mode", message: `Unsupported context '${String(input.context)}'; expected 'fresh' or 'fork'.`, diagnostics };
+	if (input.context !== undefined && input.context !== "fresh" && input.context !== "fork" && input.context !== "summary") {
+		return { ok: false, code: "unsupported_mode", message: `Unsupported context '${String(input.context)}'; expected 'fresh', 'fork', or 'summary'.`, diagnostics };
 	}
 	if (input.artifactDir !== undefined && input.artifactDir !== "project" && input.artifactDir !== "session" && input.artifactDir !== "temp") {
 		return { ok: false, code: "invalid_artifact_dir", message: `Unsupported artifactDir '${String(input.artifactDir)}'; expected 'project', 'session', or 'temp'.`, diagnostics };

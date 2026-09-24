@@ -8,7 +8,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
-type SubagentExecutionContext = "fresh" | "fork";
+type SubagentExecutionContext = "fresh" | "fork" | "summary";
+
+type ResolvableSubagentContext = SubagentExecutionContext | undefined;
 
 interface BranchSessionEntry {
 	type: string;
@@ -49,8 +51,11 @@ interface ForkContextResolver {
 	sessionFileForIndex(index?: number): string | undefined;
 }
 
-export function resolveSubagentContext(value: unknown): SubagentExecutionContext {
-	return value === "fork" ? "fork" : "fresh";
+/** Map a resolved launch-context value to a concrete mode; `undefined` falls back to fresh. */
+export function resolveSubagentContext(value: ResolvableSubagentContext): SubagentExecutionContext {
+	if (value === "fork") return "fork";
+	if (value === "summary") return "summary";
+	return "fresh";
 }
 
 export interface PreferredForkAvailability {
@@ -70,11 +75,15 @@ export interface SubagentLaunchContextInput {
 	canUseImplicitFork: boolean;
 }
 
-/** Resolve the actual launch context from explicit, global, and agent preferences. */
+/** Resolve the actual launch context from explicit, global, and agent preferences.
+ * Implicit `fork` and `summary` both require a persisted parent session with a
+ * current leaf; without one they fall back to `fresh`. Explicit values stay strict. */
 export function resolveSubagentLaunchContext(input: SubagentLaunchContextInput): SubagentExecutionContext {
 	if (input.explicitContext !== undefined) return input.explicitContext;
 	const preferredContext = input.defaultSubagentContext ?? input.agentDefaultContext ?? "fresh";
-	return preferredContext === "fork" && input.canUseImplicitFork ? "fork" : "fresh";
+	if (preferredContext === "fork" && input.canUseImplicitFork) return "fork";
+	if (preferredContext === "summary" && input.canUseImplicitFork) return "summary";
+	return "fresh";
 }
 
 /** True when an implicit `defaultContext: fork` can create a real branch now.
@@ -103,6 +112,7 @@ function isUnsafeAnthropicThinkingBlock(message: BranchSessionEntry["message"], 
 	const isAnthropic = provider === "anthropic" || api === "anthropic-messages" || model.startsWith("anthropic/");
 	if (block.type === "redacted_thinking") return true;
 	if (block.type !== "thinking" || !isAnthropic) return false;
+	// SAFETY: block is a parsed thinking block guarded by the type checks above; the cast reads its optional signature fields.
 	const record = block as Record<string, unknown>;
 	const signature = "thinkingSignature" in record ? record.thinkingSignature : "signature" in record ? record.signature : undefined;
 	return record.redacted === true || (typeof signature === "string" && signature.length > 0);
@@ -124,6 +134,7 @@ function readSessionEntries(sessionFile: string): BranchSessionEntry[] {
 	const lines = fs.readFileSync(sessionFile, "utf-8").split("\n").filter((line) => line.trim().length > 0);
 	return lines.map((line, index) => {
 		try {
+		// SAFETY: the JSONL line parsed successfully above and BranchSessionEntry is the documented session-file entry contract.
 			return JSON.parse(line) as BranchSessionEntry;
 		} catch (error) {
 			const cause = error instanceof Error ? error : new Error(String(error));
@@ -134,7 +145,7 @@ function readSessionEntries(sessionFile: string): BranchSessionEntry[] {
 
 export function createForkContextResolver(
 	sessionManager: ForkableSessionManager,
-	requestedContext: unknown,
+	requestedContext: ResolvableSubagentContext,
 	options: ForkContextResolverOptions = {},
 ): ForkContextResolver {
 	if (resolveSubagentContext(requestedContext) !== "fork") {

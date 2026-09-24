@@ -28,7 +28,7 @@ export interface SubagentDelegationRequest {
 	nodeId: string;
 	agent: string;
 	task: string;
-	context: "fresh" | "fork";
+	context: "fresh" | "fork" | "summary";
 	cwd: string;
 	model?: string;
 	thinking?: SubagentDelegationThinking;

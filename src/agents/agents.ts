@@ -30,7 +30,7 @@ export type AgentScope = "user" | "project" | "both";
 
 export type AgentSource = "builtin" | "package" | "user" | "project" | "runtime";
 type SystemPromptMode = "append" | "replace";
-export type AgentDefaultContext = "fresh" | "fork";
+export type AgentDefaultContext = "fresh" | "fork" | "summary";
 
 export type AgentMemoryScope = "project" | "user";
 
@@ -65,6 +65,8 @@ export interface BuiltinAgentOverrideBase {
 	inheritGlobalContext: boolean;
 	inheritSkills: boolean;
 	defaultContext?: AgentDefaultContext;
+	/** Optional role-directed instruction shaping a `summary` context brief for this agent. */
+	contextBrief?: string;
 	acceptanceRole?: AcceptanceRole;
 	disabled?: boolean;
 	systemPrompt: string;
@@ -95,6 +97,8 @@ interface BuiltinAgentOverrideConfig {
 	inheritGlobalContext?: boolean;
 	inheritSkills?: boolean;
 	defaultContext?: AgentDefaultContext | false;
+	/** Optional role-directed instruction shaping a `summary` context brief for this agent. */
+	contextBrief?: string | false;
 	acceptanceRole?: AcceptanceRole | false;
 	disabled?: boolean;
 	systemPrompt?: string;
@@ -149,6 +153,8 @@ export interface AgentConfig {
 	inheritGlobalContext: boolean;
 	inheritSkills: boolean;
 	defaultContext?: AgentDefaultContext;
+	/** Optional role-directed instruction shaping a `summary` context brief for this agent. */
+	contextBrief?: string;
 	defaultAsync?: boolean;
 	defaultTimeoutMs?: number;
 	defaultToolTimeoutMs?: number;
@@ -775,6 +781,7 @@ function cloneOverrideBase(agent: AgentConfig): BuiltinAgentOverrideBase {
 		inheritGlobalContext: agent.inheritGlobalContext,
 		inheritSkills: agent.inheritSkills,
 		...(agent.defaultContext !== undefined ? { defaultContext: agent.defaultContext } : {}),
+		...(agent.contextBrief !== undefined ? { contextBrief: agent.contextBrief } : {}),
 		...(agent.acceptanceRole !== undefined ? { acceptanceRole: agent.acceptanceRole } : {}),
 		...(agent.disabled !== undefined ? { disabled: agent.disabled } : {}),
 		systemPrompt: agent.systemPrompt,
@@ -807,6 +814,7 @@ function cloneOverrideValue(override: BuiltinAgentOverrideConfig): BuiltinAgentO
 		...(override.inheritGlobalContext !== undefined ? { inheritGlobalContext: override.inheritGlobalContext } : {}),
 		...(override.inheritSkills !== undefined ? { inheritSkills: override.inheritSkills } : {}),
 		...(override.defaultContext !== undefined ? { defaultContext: override.defaultContext } : {}),
+		...(override.contextBrief !== undefined ? { contextBrief: override.contextBrief } : {}),
 		...(override.acceptanceRole !== undefined ? { acceptanceRole: override.acceptanceRole } : {}),
 		...(override.disabled !== undefined ? { disabled: override.disabled } : {}),
 		...(override.systemPrompt !== undefined ? { systemPrompt: override.systemPrompt } : {}),
@@ -1054,10 +1062,20 @@ function parseBuiltinOverrideEntry(
 	}
 
 	if ("defaultContext" in input) {
-		if (input.defaultContext === "fresh" || input.defaultContext === "fork" || input.defaultContext === false) {
+		if (input.defaultContext === "fresh" || input.defaultContext === "fork" || input.defaultContext === "summary" || input.defaultContext === false) {
 			override.defaultContext = input.defaultContext;
 		} else {
-			throw new Error(`Builtin override '${name}' in '${filePath}' has invalid 'defaultContext'; expected 'fresh', 'fork', or false.`);
+			throw new Error(`Builtin override '${name}' in '${filePath}' has invalid 'defaultContext'; expected 'fresh', 'fork', 'summary', or false.`);
+		}
+	}
+
+	if ("contextBrief" in input) {
+		if (typeof input.contextBrief === "string" && input.contextBrief.trim()) {
+			override.contextBrief = input.contextBrief.trim();
+		} else if (input.contextBrief === false) {
+			override.contextBrief = false;
+		} else {
+			throw new Error(`Builtin override '${name}' in '${filePath}' has invalid 'contextBrief'; expected a non-empty string or false.`);
 		}
 	}
 
@@ -1425,6 +1443,7 @@ function applyBuiltinOverride(
 	if (override.inheritGlobalContext !== undefined) next.inheritGlobalContext = override.inheritGlobalContext;
 	if (override.inheritSkills !== undefined) next.inheritSkills = override.inheritSkills;
 	if (override.defaultContext !== undefined) { if (override.defaultContext === false) delete next.defaultContext; else next.defaultContext = override.defaultContext; }
+	if (override.contextBrief !== undefined) { if (override.contextBrief === false) delete next.contextBrief; else next.contextBrief = override.contextBrief; }
 	if (override.acceptanceRole !== undefined) { if (override.acceptanceRole === false) delete next.acceptanceRole; else next.acceptanceRole = override.acceptanceRole; }
 	if (override.disabled !== undefined) next.disabled = override.disabled;
 	if (override.systemPrompt !== undefined) next.systemPrompt = override.systemPrompt;
@@ -1538,7 +1557,7 @@ function applyCustomAgentOverrides(
 
 export function buildBuiltinOverrideConfig(
 	base: BuiltinAgentOverrideBase,
-	draft: Pick<AgentConfig, "model" | "modelProvider" | "fast" | "thinking" | "systemPromptMode" | "inheritProjectContext" | "inheritGlobalContext" | "inheritSkills" | "defaultContext" | "acceptanceRole" | "disabled" | "systemPrompt" | "skills" | "tools" | "allowNestedSubagents" | "mcpDirectTools" | "extensions" | "subagentOnlyExtensions" | "mutationTools" | "completionGuard" | "toolBudget"> & Partial<Pick<AgentConfig, "description" | "output" | "outputMode" | "defaultReads" | "excludeTools">>,
+	draft: Pick<AgentConfig, "model" | "modelProvider" | "fast" | "thinking" | "systemPromptMode" | "inheritProjectContext" | "inheritGlobalContext" | "inheritSkills" | "defaultContext" | "contextBrief" | "acceptanceRole" | "disabled" | "systemPrompt" | "skills" | "tools" | "allowNestedSubagents" | "mcpDirectTools" | "extensions" | "subagentOnlyExtensions" | "mutationTools" | "completionGuard" | "toolBudget"> & Partial<Pick<AgentConfig, "description" | "output" | "outputMode" | "defaultReads" | "excludeTools">>,
 ): BuiltinAgentOverrideConfig | undefined {
 	const override: BuiltinAgentOverrideConfig = {};
 
@@ -1558,6 +1577,7 @@ export function buildBuiltinOverrideConfig(
 	if (draft.inheritGlobalContext !== base.inheritGlobalContext) override.inheritGlobalContext = draft.inheritGlobalContext;
 	if (draft.inheritSkills !== base.inheritSkills) override.inheritSkills = draft.inheritSkills;
 	if (draft.defaultContext !== base.defaultContext) override.defaultContext = draft.defaultContext ?? false;
+	if (draft.contextBrief !== base.contextBrief) override.contextBrief = draft.contextBrief ?? false;
 	if (draft.acceptanceRole !== base.acceptanceRole) override.acceptanceRole = draft.acceptanceRole ?? false;
 	if (draft.disabled !== base.disabled) override.disabled = draft.disabled ?? false;
 	if (draft.systemPrompt !== base.systemPrompt) override.systemPrompt = draft.systemPrompt;
@@ -2046,7 +2066,13 @@ function loadAgentsFromDefinitionFiles(files: AgentDefinitionFile[], source: Age
 			? "fork" as const
 			: frontmatter.defaultContext === "fresh"
 				? "fresh" as const
-				: undefined;
+				: frontmatter.defaultContext === "summary"
+					? "summary" as const
+					: undefined;
+		let contextBrief: string | undefined;
+		if (frontmatter.contextBrief !== undefined && frontmatter.contextBrief.trim()) {
+			contextBrief = frontmatter.contextBrief.trim();
+		}
 		let defaultAsync: boolean | undefined;
 		if (frontmatter.async !== undefined) {
 			if (frontmatter.async === "true") defaultAsync = true;
@@ -2157,6 +2183,7 @@ function loadAgentsFromDefinitionFiles(files: AgentDefinitionFile[], source: Age
 			inheritGlobalContext,
 			inheritSkills,
 			...(defaultContext !== undefined ? { defaultContext } : {}),
+			...(contextBrief !== undefined ? { contextBrief } : {}),
 			...(defaultAsync !== undefined ? { defaultAsync } : {}),
 			...(defaultTimeoutMs !== undefined ? { defaultTimeoutMs } : {}),
 			...(defaultToolTimeoutMs !== undefined ? { defaultToolTimeoutMs } : {}),

@@ -1073,8 +1073,8 @@ export interface WorkflowScriptChildResult {
 	detached?: boolean;
 	interrupted?: boolean;
 	structuredOutput?: unknown;
-	requestedContext?: "fresh" | "fork";
-	resolvedContext?: "fresh" | "fork" | "mixed";
+	requestedContext?: "fresh" | "fork" | "summary";
+	resolvedContext?: "fresh" | "fork" | "summary" | "mixed";
 	outputReference?: string;
 	recovery?: AcceptanceRecoveryMetadata;
 	outputPathMapping?: { requestedPath: string; savedPath: string };

@@ -20,6 +20,7 @@ export const KNOWN_FIELDS = new Set([
 	"inheritGlobalContext",
 	"inheritSkills",
 	"defaultContext",
+	"contextBrief",
 	"async",
 	"timeoutMs",
 	"toolTimeoutMs",
@@ -89,6 +90,7 @@ export function serializeAgent(config: AgentConfig, options: SerializeAgentOptio
 	if (config.inheritGlobalContext || preserve("inheritGlobalContext")) lines.push(`inheritGlobalContext: ${config.inheritGlobalContext ? "true" : "false"}`);
 	if (!preservingExistingFrontmatter || preserve("inheritSkills")) lines.push(`inheritSkills: ${config.inheritSkills ? "true" : "false"}`);
 	if (config.defaultContext || preserve("defaultContext")) lines.push(`defaultContext: ${config.defaultContext ?? ""}`);
+	if (config.contextBrief || preserve("contextBrief")) lines.push(`contextBrief: ${config.contextBrief ?? ""}`);
 	if (config.runner || preserve("runner")) {
 		if (config.runner) {
 			lines.push("runner:");

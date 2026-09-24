@@ -282,7 +282,7 @@ const noisyStatusPatterns = [
 	/^(?:checking|fetching|reading|inspecting|verifying|collecting|confirming|polling)\b/i,
 	/^(?:async\s+subagent\s+)?[\w.-]+\s*·\s*(?:step|agent)\s+\d+\/\d+\s*·/i,
 	/^(?:Step|Agent)\s+\d+\/\d+:\s+[\w.-]+\s*·\s*(?:running|queued|pending|complete|completed)\b/i,
-	/^(?:async\s+subagent\s+)?[\w.-]+(?:\s+\[(?:fresh|fork|mixed)\])?\s*·\s*(?:running|queued|pending|complete|completed|done)\b/i,
+	/^(?:async\s+subagent\s+)?[\w.-]+(?:\s+\[(?:fresh|fork|summary|mixed)\])?\s*·\s*(?:running|queued|pending|complete|completed|done)\b/i,
 	/^Press\s+\S+\s+for\s+live\s+detail$/i,
 	/^output:\s+.+\/async-subagent-runs\//i,
 ];

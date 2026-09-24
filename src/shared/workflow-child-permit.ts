@@ -7,7 +7,7 @@ export interface WorkflowChildPermitInput {
 	childKey: string;
 	agent: string;
 	launchContractDigest: string;
-	context: "fresh" | "fork";
+	context: "fresh" | "fork" | "summary";
 }
 
 export interface WorkflowChildPermitLaunch {
@@ -15,7 +15,7 @@ export interface WorkflowChildPermitLaunch {
 	childKey: string;
 	agent: string;
 	launchContractDigest: string;
-	context: "fresh" | "fork";
+	context: "fresh" | "fork" | "summary";
 	runner: "pi";
 }
 

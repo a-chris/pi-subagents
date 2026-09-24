@@ -227,7 +227,7 @@ interface StepResult {
 	agent: string;
 	/** Human-readable display name for the child session, when derived at launch. */
 	sessionName?: string;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	capabilityAudit?: import("../shared/capability-ceiling.ts").SubagentCapabilityAudit;
 	launchResolvedExtensions?: LaunchResolvedChildExtensions;
@@ -2271,7 +2271,7 @@ export async function runSubagent(
 		appendJsonl(eventsPath, JSON.stringify({ type: "subagent.step.stopped", ts: now, runId: id, stepIndex: index, childId, agent: step.agent, exitCode: 1, durationMs: step.durationMs }));
 		appendChildStatusEvent(index, childId, "stopped", now);
 	};
-	const childStopResult = (index: number, agent: string, context?: "fresh" | "fork"): SingleStepResult => {
+	const childStopResult = (index: number, agent: string, context?: "fresh" | "fork" | "summary"): SingleStepResult => {
 		markChildStopped(index);
 		return stoppedStepResult(agent, context, requiredStatusStep(statusPayload, index).sessionName);
 	};
@@ -2437,7 +2437,7 @@ export async function runSubagent(
 			}
 		}
 	};
-	const pausedStepResult = (agent: string, context?: "fresh" | "fork", sessionName?: string): SingleStepResult => omitUndefinedProperties({
+	const pausedStepResult = (agent: string, context?: "fresh" | "fork" | "summary", sessionName?: string): SingleStepResult => omitUndefinedProperties({
 		agent,
 		sessionName,
 		context,
@@ -2445,7 +2445,7 @@ export async function runSubagent(
 		exitCode: 0,
 		interrupted: true,
 	});
-	const timedOutStepResult = (agent: string, context?: "fresh" | "fork", sessionName?: string): SingleStepResult => omitUndefinedProperties({
+	const timedOutStepResult = (agent: string, context?: "fresh" | "fork" | "summary", sessionName?: string): SingleStepResult => omitUndefinedProperties({
 		agent,
 		sessionName,
 		context,
@@ -2454,7 +2454,7 @@ export async function runSubagent(
 		exitCode: 1,
 		timedOut: true,
 	});
-	const stoppedStepResult = (agent: string, context?: "fresh" | "fork", sessionName?: string): SingleStepResult => omitUndefinedProperties({
+	const stoppedStepResult = (agent: string, context?: "fresh" | "fork" | "summary", sessionName?: string): SingleStepResult => omitUndefinedProperties({
 		agent,
 		sessionName,
 		context,

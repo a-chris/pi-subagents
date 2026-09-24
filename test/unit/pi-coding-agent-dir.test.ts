@@ -287,7 +287,7 @@ Package skill content.
 		assert.equal(loadConfig().defaultSubagentContext, "fresh");
 
 		writeFile(configPath, JSON.stringify({ defaultSubagentContext: "other" }));
-		assert.throws(() => updateConfig((config) => config), /config\.defaultSubagentContext must be "fresh" or "fork"/);
+		assert.throws(() => updateConfig((config) => config), /config\.defaultSubagentContext must be "fresh", "fork", or "summary"/);
 	});
 
 	it("accepts valid global checkpoint offsets and rejects invalid config before execution", () => {

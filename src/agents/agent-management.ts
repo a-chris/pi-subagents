@@ -270,6 +270,7 @@ export function editableAgentConfig(agent: AgentConfig): AgentConfig {
 		inheritGlobalContext: _inheritGlobalContext,
 		inheritSkills: _inheritSkills,
 		defaultContext: _defaultContext,
+		contextBrief: _contextBrief,
 		acceptanceRole: _acceptanceRole,
 		disabled: _disabled,
 		systemPrompt: _systemPrompt,
@@ -306,6 +307,7 @@ export function editableAgentConfig(agent: AgentConfig): AgentConfig {
 		inheritGlobalContext: base.inheritGlobalContext,
 		inheritSkills: base.inheritSkills,
 		...(base.defaultContext !== undefined ? { defaultContext: base.defaultContext } : {}),
+		...(base.contextBrief !== undefined ? { contextBrief: base.contextBrief } : {}),
 		...(base.acceptanceRole !== undefined ? { acceptanceRole: base.acceptanceRole } : {}),
 		...(base.disabled !== undefined ? { disabled: base.disabled } : {}),
 		systemPrompt: base.systemPrompt,
@@ -374,6 +376,7 @@ export function preservedAgentFrontmatterFields(agent: AgentConfig, cfg: Record<
 		fields.add("inheritSkills");
 	}
 	if (hasKey(cfg, "defaultContext")) changed("defaultContext");
+	if (hasKey(cfg, "contextBrief")) changed("contextBrief");
 	if (hasKey(cfg, "async")) changed("async");
 	if (hasKey(cfg, "timeoutMs")) changed("timeoutMs");
 	if (hasKey(cfg, "acceptance")) changed("acceptance");
@@ -547,8 +550,13 @@ function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknown>): st
 	}
 	if (hasKey(cfg, "defaultContext")) {
 		if (cfg.defaultContext === false || cfg.defaultContext === "") delete target.defaultContext;
-		else if (cfg.defaultContext === "fresh" || cfg.defaultContext === "fork") target.defaultContext = cfg.defaultContext;
-		else return "config.defaultContext must be 'fresh', 'fork', or false when provided.";
+		else if (cfg.defaultContext === "fresh" || cfg.defaultContext === "fork" || cfg.defaultContext === "summary") target.defaultContext = cfg.defaultContext;
+		else return "config.defaultContext must be 'fresh', 'fork', 'summary', or false when provided.";
+	}
+	if (hasKey(cfg, "contextBrief")) {
+		if (cfg.contextBrief === false || cfg.contextBrief === "") delete target.contextBrief;
+		else if (typeof cfg.contextBrief === "string" && cfg.contextBrief.trim()) target.contextBrief = cfg.contextBrief.trim();
+		else return "config.contextBrief must be a non-empty string or false when provided.";
 	}
 	if (hasKey(cfg, "async")) {
 		if (cfg.async === "") delete target.defaultAsync;

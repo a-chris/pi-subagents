@@ -18,7 +18,7 @@ export interface RunnerSubagentStep {
 		requestDigest: string;
 	};
 	/** Resolved launch context for this child. */
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	importAsyncRoot?: {
 		runId: string;
 		asyncDir: string;

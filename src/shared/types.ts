@@ -217,8 +217,8 @@ export type WorkflowReceiptEntry = WorkflowReceiptEntryResumability & {
 	lane?: WorkflowLaneMetadata;
 	terminalOutcome?: WorkflowTerminalOutcome;
 	agent?: string;
-	requestedContext?: "fresh" | "fork";
-	resolvedContext?: "fresh" | "fork" | "mixed";
+	requestedContext?: "fresh" | "fork" | "summary";
+	resolvedContext?: "fresh" | "fork" | "summary" | "mixed";
 	outputReference?: string;
 	acceptanceRecovery?: AcceptanceRecoveryMetadata;
 	externalAdapter?: ExternalCliReceiptMetadata;
@@ -849,7 +849,7 @@ export interface SteeringRecoveryDescriptor {
 	acceptance?: AcceptanceInput;
 	controlConfig?: ResolvedControlConfig;
 	/** Resolved launch context for this async child. */
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	lane?: WorkflowLaneMetadata;
 	absoluteDeadlineAt?: number;
 	initialToolBudget?: ResolvedToolBudget;
@@ -1214,7 +1214,7 @@ export interface SingleResult {
 	 *  excerpt), when the launcher derived one. Display metadata only. */
 	sessionName?: string;
 	/** Resolved launch context for this child. */
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	exitCode: number;
 	processSignal?: string | null;
 	timeoutRecovery?: TimeoutRecoverySummary;
@@ -1372,7 +1372,7 @@ export interface Details {
 	/** Host tool-call id retained when it differs from the internal run id. */
 	toolCallId?: string;
 	/** Run-level context summary. "mixed" when children resolved to different modes. */
-	context?: "fresh" | "fork" | "mixed";
+	context?: "fresh" | "fork" | "summary" | "mixed";
 	results: SingleResult[];
 	workflowChildren?: WorkflowChildSummary;
 	/**
@@ -1775,7 +1775,7 @@ export interface AsyncStatus {
 	toolCallId?: string;
 	sessionId?: string;
 	mode: SubagentRunMode;
-	context?: "fresh" | "fork" | "mixed";
+	context?: "fresh" | "fork" | "summary" | "mixed";
 	isNested?: boolean;
 	state: "queued" | "running" | "complete" | "failed" | "partial" | "paused" | "stopped" | "rejected";
 	/** Display-only dismissal marker for a reload-orphaned workflow. */
@@ -1837,7 +1837,7 @@ export interface AsyncStatus {
 		externalProcess?: ExternalProcessStatus;
 		externalJob?: ExternalJobStatus;
 		/** Resolved launch context for this child step. */
-		context?: "fresh" | "fork";
+		context?: "fresh" | "fork" | "summary";
 		/** Short caller-facing task/goal shown in fleet surfaces when available. */
 		description?: string;
 		phase?: string;
@@ -1956,7 +1956,7 @@ export interface AsyncJobState {
 	steering?: SteeringStatus;
 	mode?: SubagentRunMode;
 	/** Run-level context summary derived from step contexts. */
-	context?: "fresh" | "fork" | "mixed";
+	context?: "fresh" | "fork" | "summary" | "mixed";
 	agents?: string[];
 	currentStep?: number;
 	chainStepCount?: number;
@@ -2004,7 +2004,7 @@ export interface ForegroundResumeChild {
 	/** Human-readable display name for the child session, when derived at launch. */
 	sessionName?: string;
 	index: number;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	sessionFile?: string;
 	model?: string;
 	thinking?: string;
@@ -2305,7 +2305,7 @@ export interface RunSyncOptions {
 	/** Direct parent session id for permission-system ask forwarding. */
 	parentSessionId?: string;
 	/** Resolved launch context for this child. */
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	cwd?: string;
 	/** Original cwd input retained for launch diagnostics. */
 	requestedCwd?: string;
@@ -2470,6 +2470,15 @@ export interface ForkContextConfig {
 	model?: string;
 }
 
+export interface SummaryContextConfig {
+	/** Model that generates the role-directed context brief; defaults to the parent's own model. */
+	model?: string;
+	/** Maximum characters of the generated brief; defaults to 4096. */
+	maxBriefChars?: number;
+	/** Maximum session-history characters fed to the brief generator; defaults to 100000. */
+	maxInputChars?: number;
+}
+
 export interface ActiveAsyncCapacityConfig {
 	/** Reclaim failed runner slots after this age when process proof is unknown; false keeps strict retention. */
 	abandonedSlotReleaseAfterMs?: number | false;
@@ -2478,9 +2487,11 @@ export interface ActiveAsyncCapacityConfig {
 export interface ExtensionConfig {
 	asyncByDefault?: boolean;
 	/** Set the context for launches that omit an explicit context. */
-	defaultSubagentContext?: "fresh" | "fork";
+	defaultSubagentContext?: "fresh" | "fork" | "summary";
 	/** Configure how every resolved fork session is prepared before child spawn. */
 	forkContext?: ForkContextConfig;
+	/** Configure role-directed context briefs for launches resolved to `summary`. */
+	summaryContext?: SummaryContextConfig;
 	/** Optional shortcut that detaches the active foreground single-subagent run. */
 	foregroundDetachShortcut?: string;
 	/** Show the Claude Code-style navigable fleet. Defaults to true. */

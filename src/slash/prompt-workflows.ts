@@ -11,7 +11,7 @@ interface PromptWorkflow {
 	body: string;
 	filePath: string;
 	agent: string;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	model?: string;
 	skill?: string | string[] | false;
 	cwd?: string;

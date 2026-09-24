@@ -356,7 +356,7 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 	}
 	if (parsed.systemPromptMode !== "append" && parsed.systemPromptMode !== "replace") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': systemPromptMode is invalid.`);
 	if (parsed.outputMode !== "inline" && parsed.outputMode !== "file-only") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': outputMode is invalid.`);
-	if (parsed.context !== undefined && parsed.context !== "fresh" && parsed.context !== "fork") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': context is invalid.`);
+	if (parsed.context !== undefined && parsed.context !== "fresh" && parsed.context !== "fork" && parsed.context !== "summary") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': context is invalid.`);
 	if (parsed.modelOverrideFromParent !== undefined && typeof parsed.modelOverrideFromParent !== "boolean") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': modelOverrideFromParent must be a boolean.`);
 	if (parsed.fast !== undefined && typeof parsed.fast !== "boolean") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': fast must be a boolean.`);
 	if (parsed.modelOrigin !== undefined && parsed.modelOrigin !== "explicit" && parsed.modelOrigin !== "inherited" && parsed.modelOrigin !== "configured") throw new Error(`Invalid async recovery descriptor '${descriptorPath}': modelOrigin must be 'explicit', 'inherited', or 'configured'.`);

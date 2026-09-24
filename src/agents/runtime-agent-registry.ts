@@ -30,6 +30,7 @@ export interface RuntimeAgentDefinition {
 	inheritGlobalContext?: boolean;
 	inheritSkills?: boolean;
 	defaultContext?: AgentDefaultContext;
+	contextBrief?: string;
 	defaultAsync?: boolean;
 	defaultTimeoutMs?: number;
 	defaultToolTimeoutMs?: number;
@@ -198,7 +199,7 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	const definition = value as Record<string, unknown>;
 	const supported = new Set([
 		"description", "systemPrompt", "aliases", "tools", "excludeTools", "allowNestedSubagents", "mcpDirectTools", "model", "thinking",
-		"systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "defaultContext", "defaultAsync", "defaultTimeoutMs",
+		"systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "defaultContext", "contextBrief", "defaultAsync", "defaultTimeoutMs",
 		"defaultToolTimeoutMs", "defaultAcceptance", "acceptanceRole", "runner", "skills", "skillPath",
 		"extensions", "subagentOnlyExtensions", "mutationTools", "output", "outputMode", "defaultReads", "defaultProgress", "interactive",
 		"maxSubagentDepth", "completionGuard", "toolBudget", "permissions",
@@ -208,7 +209,9 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	const systemPromptMode = definition.systemPromptMode;
 	if (systemPromptMode !== undefined && systemPromptMode !== "append" && systemPromptMode !== "replace") throw new Error("Runtime agent definition systemPromptMode must be 'append' or 'replace'.");
 	const defaultContext = definition.defaultContext;
-	if (defaultContext !== undefined && defaultContext !== "fresh" && defaultContext !== "fork") throw new Error("Runtime agent definition defaultContext must be 'fresh' or 'fork'.");
+	if (defaultContext !== undefined && defaultContext !== "fresh" && defaultContext !== "fork" && defaultContext !== "summary") throw new Error("Runtime agent definition defaultContext must be 'fresh', 'fork', or 'summary'.");
+	const contextBrief = definition.contextBrief;
+	if (contextBrief !== undefined && (typeof contextBrief !== "string" || !contextBrief.trim())) throw new Error("Runtime agent definition contextBrief must be a non-empty string.");
 	const thinking = definition.thinking;
 	if (thinking !== undefined && thinking !== false && typeof thinking !== "string") throw new Error("Runtime agent definition thinking must be a string or false when provided.");
 	const acceptanceRole = definition.acceptanceRole;
@@ -337,6 +340,7 @@ function toAgentConfig(name: string, definition: RuntimeAgentDefinition): AgentC
 		inheritGlobalContext: definition.inheritGlobalContext ?? false,
 		inheritSkills: definition.inheritSkills ?? defaultInheritSkills(),
 		...(definition.defaultContext !== undefined ? { defaultContext: definition.defaultContext } : {}),
+		...(definition.contextBrief !== undefined ? { contextBrief: definition.contextBrief } : {}),
 		...(definition.defaultAsync !== undefined ? { defaultAsync: definition.defaultAsync } : {}),
 		...(definition.defaultTimeoutMs !== undefined ? { defaultTimeoutMs: definition.defaultTimeoutMs } : {}),
 		...(definition.defaultToolTimeoutMs !== undefined ? { defaultToolTimeoutMs: definition.defaultToolTimeoutMs } : {}),

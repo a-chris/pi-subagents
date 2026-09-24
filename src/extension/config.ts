@@ -36,6 +36,21 @@ function validateForkContextConfig(value: unknown): void {
 	}
 }
 
+function validateSummaryContextConfig(value: unknown): void {
+	if (value === undefined) return;
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("config.summaryContext must be a JSON object");
+	const config = value as Record<string, unknown>;
+	if (config.model !== undefined && (typeof config.model !== "string" || !config.model.trim())) {
+		throw new Error("config.summaryContext.model must be a non-empty string");
+	}
+	if (config.maxBriefChars !== undefined && (typeof config.maxBriefChars !== "number" || !Number.isInteger(config.maxBriefChars) || config.maxBriefChars <= 0)) {
+		throw new Error("config.summaryContext.maxBriefChars must be a positive integer");
+	}
+	if (config.maxInputChars !== undefined && (typeof config.maxInputChars !== "number" || !Number.isInteger(config.maxInputChars) || config.maxInputChars <= 0)) {
+		throw new Error("config.summaryContext.maxInputChars must be a positive integer");
+	}
+}
+
 function isValidKeyId(value: string): boolean {
 	if (value !== value.trim()) return false;
 	const parts = value.toLowerCase().split("+");
@@ -138,10 +153,11 @@ function validateConfig(config: Record<string, unknown>): void {
 		if (typeof config.worktreeBranchPrefix !== "string") throw new Error("config.worktreeBranchPrefix must be a string");
 		normalizeWorktreeBranchPrefix(config.worktreeBranchPrefix);
 	}
-	if (config.defaultSubagentContext !== undefined && config.defaultSubagentContext !== "fresh" && config.defaultSubagentContext !== "fork") {
-		throw new Error('config.defaultSubagentContext must be "fresh" or "fork"');
+	if (config.defaultSubagentContext !== undefined && config.defaultSubagentContext !== "fresh" && config.defaultSubagentContext !== "fork" && config.defaultSubagentContext !== "summary") {
+		throw new Error('config.defaultSubagentContext must be "fresh", "fork", or "summary"');
 	}
 	validateForkContextConfig(config.forkContext);
+	validateSummaryContextConfig(config.summaryContext);
 	if (config.checkpointBeforeDeadlineMs !== undefined
 		&& (typeof config.checkpointBeforeDeadlineMs !== "number"
 			|| !Number.isInteger(config.checkpointBeforeDeadlineMs)

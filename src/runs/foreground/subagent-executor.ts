@@ -194,6 +194,7 @@ import {
 	type ScheduleOrigin,
 	type SteeringTargetState,
 } from "../../shared/types.ts";
+import { generateContextBrief, wrapSummaryTask } from "../../shared/context-brief.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 
 const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.rollback", "dismiss", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
@@ -365,7 +366,7 @@ export interface SubagentParamsLike {
 	worktree?: boolean;
 	/** Git ref used as the managed worktree base. */
 	baseRef?: string;
-	context?: "fresh" | "fork" | "profile";
+	context?: "fresh" | "fork" | "summary" | "profile";
 	async?: boolean;
 	foregroundOnly?: boolean;
 	timeoutMs?: number;
@@ -492,6 +493,7 @@ interface ExecutionContextData {
 	sessionDirForIndex: (idx?: number) => string;
 	sessionFileForIndex: (idx?: number) => string | undefined;
 	sessionFileForTask: ForkSessionFileForTask;
+	summaryBriefForTask?: (agentName: string, idx?: number) => string | undefined;
 	thinkingOverrideForTask: ThinkingOverrideForTask;
 	artifactConfig: ArtifactConfig;
 	artifactsDir: string;
@@ -1177,13 +1179,13 @@ function duplicateNames(names: string[]): string[] {
 	return [...duplicates];
 }
 
-function appendStepToAsyncChain(input: {
+async function appendStepToAsyncChain(input: {
 	params: SubagentParamsLike;
 	requestCwd: string;
 	ctx: ExtensionContext;
 	deps: ExecutorDeps;
 	parentModel?: ParentModel;
-}): AgentToolResult<Details> {
+}): Promise<AgentToolResult<Details>> {
 	const targetRunId = input.params.id ?? input.params.runId;
 	if (!targetRunId) {
 		return {
@@ -1297,7 +1299,22 @@ function appendStepToAsyncChain(input: {
 			details: { mode: "management", results: [] },
 		};
 	}
-	const contextPolicy = resolveExplicitContextPolicy(input.params);
+	let contextPolicy = resolveExplicitContextPolicy(input.params);
+	const summaryBriefs = await loadSummaryBriefsForLaunch({
+		contextPolicy,
+		agentNames: requestedStaticAgentNames({ ...input.params, chain }),
+		ctx: input.ctx,
+		config: input.deps.config,
+		agents,
+	});
+	const originalContextForAgent = contextPolicy.contextForAgent;
+	contextPolicy = {
+		...contextPolicy,
+		contextForAgent: (agentName: string): ContextMode => {
+			const mode = originalContextForAgent(agentName);
+			return mode === "summary" && !summaryBriefs.has(agentName) ? "fresh" : mode;
+		},
+	};
 	const chainSkillInput = normalizeSkillInput(input.params.skill);
 	const chainSkills = chainSkillInput === false ? [] : (chainSkillInput ?? []);
 	const parentModel = input.parentModel;
@@ -1315,7 +1332,7 @@ function appendStepToAsyncChain(input: {
 		childRuntime: input.deps.childRuntime,
 	});
 	const built = buildAsyncRunnerSteps(resolved.id, compactOptional<Parameters<typeof buildAsyncRunnerSteps>[1]>({
-		chain: wrapChainTasksForFork(chain, contextPolicy),
+		chain: wrapChainTasksForContext(chain, contextPolicy, (agentName: string) => summaryBriefs.get(agentName)),
 		task: input.params.task,
 		resultMode: "chain",
 		agents,
@@ -1905,10 +1922,26 @@ async function resumeAsyncRun(input: {
 		}
 		const artifactConfig: ArtifactConfig = omitUndefinedProperties({ ...DEFAULT_ARTIFACT_CONFIG, enabled: input.params.artifacts !== false, dir: input.deps.config.artifactDir ?? DEFAULT_ARTIFACT_CONFIG.dir });
 		const availableModels = input.ctx.modelRegistry.getAvailable().map(toModelInfo);
-		const contextPolicy = resolveExplicitContextPolicy(input.params);
+		let contextPolicy = resolveExplicitContextPolicy(input.params);
 		const workflowTask = (input.params.task ?? followUp) || undefined;
 		const goal = resolveAsyncEventGoal(workflowTask, attachChain);
-		const chain = wrapChainTasksForFork(attachChain, contextPolicy);
+		const summaryBriefs = await loadSummaryBriefsForLaunch({
+			contextPolicy,
+			agentNames: requestedStaticAgentNames({ ...input.params, agent: undefined, tasks: undefined, chain: attachChain }),
+			ctx: input.ctx,
+			config: input.deps.config,
+			agents,
+			signal: input.signal,
+		});
+		const originalContextForAgent = contextPolicy.contextForAgent;
+		contextPolicy = {
+			...contextPolicy,
+			contextForAgent: (agentName: string): ContextMode => {
+				const mode = originalContextForAgent(agentName);
+				return mode === "summary" && !summaryBriefs.has(agentName) ? "fresh" : mode;
+			},
+		};
+		const chain = wrapChainTasksForContext(attachChain, contextPolicy, (agentName: string) => summaryBriefs.get(agentName));
 		const normalized = normalizeSkillInput(input.params.skill);
 		const parentModel = input.parentModel;
 		const result = executeAsyncChain(runId, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
@@ -2492,6 +2525,8 @@ interface AgentDefaultContextPolicy {
 	contextForAgent(agentName: string): ContextMode;
 	contextSummary?: ContextSummary;
 	usesFork: boolean;
+	/** True when any requested agent resolves to `summary` context. */
+	usesSummary: boolean;
 }
 
 type AgentDefaultContextPolicyResult = AgentDefaultContextPolicy | { error: string };
@@ -2521,9 +2556,10 @@ function resolveAgentDefaultContextPolicy(
 			contextForAgent,
 			contextSummary,
 			usesFork: contextSummary === "fork" || contextSummary === "mixed",
+			usesSummary: contextSummary === "summary" || contextSummary === "mixed",
 		};
 	}
-	if (params.context === "fresh" || params.context === "fork") return resolveExplicitContextPolicy(params);
+	if (params.context === "fresh" || params.context === "fork" || params.context === "summary") return resolveExplicitContextPolicy(params);
 	const byName = new Map(agents.map((agent) => [agent.name, agent]));
 	const contextForAgent = (agentName: string): ContextMode =>
 		resolveSubagentLaunchContext({
@@ -2535,11 +2571,13 @@ function resolveAgentDefaultContextPolicy(
 	const requestedAgentNames = collectRequestedAgentNames(params);
 	const contextSummary = summarizeContextModes(requestedAgentNames.map((name) => contextForAgent(name)));
 	const usesFork = contextSummary === "fork" || contextSummary === "mixed";
+	const usesSummary = contextSummary === "summary" || contextSummary === "mixed";
 	return omitUndefinedProperties({
 		params,
 		contextForAgent,
 		contextSummary,
 		usesFork,
+		usesSummary,
 	});
 }
 
@@ -2553,6 +2591,7 @@ function resolveExplicitContextPolicy(params: SubagentParamsLike): AgentDefaultC
 		contextForAgent: () => context,
 		contextSummary: context,
 		usesFork: context === "fork",
+		usesSummary: context === "summary",
 	};
 }
 
@@ -2566,6 +2605,22 @@ function collectRequestedAgentNames(params: SubagentParamsLike): string[] {
 
 function shouldForkAgent(contextPolicy: AgentDefaultContextPolicy, agentName: string): boolean {
 	return contextPolicy.contextForAgent(agentName) === "fork";
+}
+
+function shouldSummaryAgent(contextPolicy: AgentDefaultContextPolicy, agentName: string): boolean {
+	return contextPolicy.contextForAgent(agentName) === "summary";
+}
+
+/** Wrap a step task for its resolved context: fork preamble, summary brief, or raw. */
+function wrapStepTaskForContext(
+	agentName: string,
+	task: string,
+	contextPolicy: AgentDefaultContextPolicy,
+	summaryBriefForTask?: (agentName: string) => string | undefined,
+): string {
+	if (shouldForkAgent(contextPolicy, agentName)) return wrapForkTask(task);
+	const brief = summaryBriefForTask?.(agentName);
+	return brief ? wrapSummaryTask(task, brief) : task;
 }
 
 
@@ -2916,16 +2971,18 @@ function resolveAsyncEventGoal(workflowTask: string | undefined, rawChain: Chain
 	return fallback.startsWith(forkPrefix) ? fallback.slice(forkPrefix.length) : fallback;
 }
 
-function wrapChainTasksForFork(chain: ChainStep[], contextPolicy: AgentDefaultContextPolicy): ChainStep[] {
+function wrapChainTasksForContext(
+	chain: ChainStep[],
+	contextPolicy: AgentDefaultContextPolicy,
+	summaryBriefForTask?: (agentName: string, idx?: number) => string | undefined,
+): ChainStep[] {
 	return chain.map((step, stepIndex) => {
 		if (isParallelStep(step)) {
 			return compactOptional<ParallelStep>({
 				...step,
 				parallel: step.parallel.map((task) => compactOptional<ParallelTaskItem>({
 					...task,
-					task: shouldForkAgent(contextPolicy, task.agent)
-						? wrapForkTask(task.task ?? "{previous}")
-						: task.task,
+					task: wrapStepTaskForContext(task.agent, task.task ?? "{previous}", contextPolicy, summaryBriefForTask),
 				})),
 			});
 		}
@@ -2934,20 +2991,70 @@ function wrapChainTasksForFork(chain: ChainStep[], contextPolicy: AgentDefaultCo
 				...step,
 				parallel: compactOptional<DynamicParallelStep["parallel"]>({
 					...step.parallel,
-					task: shouldForkAgent(contextPolicy, step.parallel.agent)
-						? wrapForkTask(step.parallel.task ?? "{previous}")
-						: step.parallel.task,
+					task: wrapStepTaskForContext(step.parallel.agent, step.parallel.task ?? "{previous}", contextPolicy, summaryBriefForTask),
 				}),
 			});
 		}
 		const sequential = step as SequentialStep;
 		return compactOptional<SequentialStep>({
 			...sequential,
-			task: shouldForkAgent(contextPolicy, sequential.agent)
-				? wrapForkTask(sequential.task ?? (stepIndex === 0 ? "{task}" : "{previous}"))
-				: sequential.task,
+			task: wrapStepTaskForContext(sequential.agent, sequential.task ?? (stepIndex === 0 ? "{task}" : "{previous}"), contextPolicy, summaryBriefForTask),
 		});
 	});
+}
+
+/** Collect the distinct agent names requested by a static launch shape. */
+function requestedStaticAgentNames(params: SubagentParamsLike): string[] {
+	const names: string[] = [];
+	if (params.agent) names.push(params.agent);
+	for (const task of params.tasks ?? []) names.push(task.agent);
+	for (const step of params.chain ?? []) names.push(...getStepAgents(step));
+	return [...new Set(names.filter((name): name is string => Boolean(name)))];
+}
+
+/**
+ * Generate and cache role-directed context briefs for every summary-resolved
+ * agent. Generation failures fall back to fresh (no brief) with a warning and
+ * never abort the launch.
+ */
+async function loadSummaryBriefsForLaunch(input: {
+	contextPolicy: AgentDefaultContextPolicy;
+	agentNames: Iterable<string>;
+	ctx: ExtensionContext;
+	config: ExtensionConfig;
+	agents: AgentConfig[];
+	signal?: AbortSignal;
+}): Promise<Map<string, string>> {
+	const briefs = new Map<string, string>();
+	const parentSessionFile = input.ctx.sessionManager.getSessionFile?.() ?? undefined;
+	if (!parentSessionFile || !fs.existsSync(parentSessionFile)) {
+		for (const agentName of new Set(input.agentNames)) {
+			if (shouldSummaryAgent(input.contextPolicy, agentName)) {
+				console.warn(`[pi-subagents] summary context requested for agent '${agentName}' but no persisted parent session is available; launching fresh.`);
+			}
+		}
+		return briefs;
+	}
+	const seen = new Set<string>();
+	for (const agentName of input.agentNames) {
+		if (!shouldSummaryAgent(input.contextPolicy, agentName) || seen.has(agentName)) continue;
+		seen.add(agentName);
+		try {
+			const brief = await generateContextBrief({
+				sessionFile: parentSessionFile,
+				agentName,
+				contextBrief: input.agents.find((agent) => agent.name === agentName)?.contextBrief,
+				config: input.config.summaryContext,
+				ctx: input.ctx,
+				signal: input.signal,
+			});
+			briefs.set(agentName, brief);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.warn(`[pi-subagents] context brief generation failed for agent '${agentName}'; launching fresh: ${message}`);
+		}
+	}
+	return briefs;
 }
 
 async function preflightForkSessionsForStaticTasks(
@@ -3168,7 +3275,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		if (launchRuleError) return toExecutionErrorResult(params, new Error(launchRuleError), data.contextPolicy.contextSummary);
 		const asyncResult = await executeAsyncSingle(id, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
-			task: shouldForkAgent(contextPolicy, params.agent!) ? wrapForkTask(params.task ?? "") : (params.task ?? ""),
+				task: wrapStepTaskForContext(params.agent!, params.task ?? "", contextPolicy, data.summaryBriefForTask),
 			goal: params.task ?? "",
 			agentConfig: a,
 			recoveryAgentConfig: data.recoveryAgents.find((agent) => agent.name === params.agent),
@@ -3695,6 +3802,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	if (shouldForkAgent(contextPolicy, params.agent!)) {
 		task = wrapForkTask(task);
 	}
+	const summaryBrief = data.summaryBriefForTask?.(params.agent!, 0);
+	if (summaryBrief) task = wrapSummaryTask(task, summaryBrief);
 	const cleanTask = task;
 	const outputPath = resolveSingleOutputPath(effectiveOutput, ctx.cwd, singleCwd, resolveSingleRunOutputBaseDir(deps, artifactsDir, runId));
 	const validationError = validateFileOnlyOutputMode(effectiveOutputMode, outputPath, `Single run (${params.agent})`);
@@ -4105,7 +4214,7 @@ function workflowChildResult(
 	}
 	const structured = result.details.results.map((child) => child.structuredOutput).filter((value) => value !== undefined);
 	const resolvedAgents = [...new Set(result.details.results.map((child) => child.agent).filter((agent): agent is string => Boolean(agent)))];
-	const resolvedContexts = [...new Set(result.details.results.map((child) => child.context).filter((context): context is "fresh" | "fork" => context === "fresh" || context === "fork"))];
+	const resolvedContexts = [...new Set(result.details.results.map((child) => child.context).filter((context): context is "fresh" | "fork" | "summary" => context === "fresh" || context === "fork" || context === "summary"))];
 	const runId = result.details.runId ?? result.details.asyncId;
 	let resumability: WorkflowScriptChildResult["resumability"];
 	if (!runId || !resumeState) {
@@ -4120,7 +4229,7 @@ function workflowChildResult(
 			resumability = { state: "not-resumable", reason: error instanceof Error ? error.message : String(error) };
 		}
 	}
-	const requestedContext = childParams.context === "fresh" || childParams.context === "fork" ? childParams.context : undefined;
+	const requestedContext = childParams.context === "fresh" || childParams.context === "fork" || childParams.context === "summary" ? childParams.context : undefined;
 	const resolvedContext = result.details.context ?? (resolvedContexts.length === 1 ? resolvedContexts[0] : resolvedContexts.length > 1 ? "mixed" : undefined);
 	const outputReference = result.details.results.find((child) => child.savedOutputPath)?.savedOutputPath
 		?? result.details.results.find((child) => child.outputReference?.path)?.outputReference?.path;
@@ -6608,7 +6717,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			canPreferFork(ctx.sessionManager),
 		);
 		if ("error" in contextPolicyResult) return buildRequestedModeError(effectiveParams, contextPolicyResult.error);
-		const contextPolicy = contextPolicyResult;
+		let contextPolicy = contextPolicyResult;
 		effectiveParams = contextPolicy.params;
 		const agents = discoveredAgents;
 		const runId = randomUUID();
@@ -6662,6 +6771,37 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			forkSessionFileForIndex = forkContextResolver.sessionFileForIndex;
 		} catch (error) {
 			return toExecutionErrorResult(effectiveParams, error, contextPolicy.contextSummary);
+		}
+		let summaryBriefForTask: (agentName: string, idx?: number) => string | undefined = () => undefined;
+		// Summary context distills the parent session into a role-directed brief; any
+		// generation failure falls back to a fresh launch with a warning and never
+		// aborts the run. Children whose brief could not be produced resolve to fresh.
+		if (contextPolicy.usesSummary) {
+			try {
+				const summaryBriefs = await loadSummaryBriefsForLaunch({
+					contextPolicy,
+					agentNames: requestedStaticAgentNames(effectiveParams),
+					ctx,
+					config: deps.config,
+					agents: discoveredAgents,
+					signal,
+				});
+				summaryBriefForTask = (agentName) => summaryBriefs.get(agentName);
+				const originalContextForAgent = contextPolicy.contextForAgent;
+				// Downgrade every summary-resolved agent that has no usable brief to fresh,
+				// including the all-failed/empty-map case: a child without a brief must never
+				// be labeled `summary`.
+				contextPolicy = {
+					...contextPolicy,
+					contextForAgent: (agentName: string): ContextMode => {
+						const mode = originalContextForAgent(agentName);
+						return mode === "summary" && !summaryBriefs.has(agentName) ? "fresh" : mode;
+					},
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				console.warn(`[pi-subagents] summary context unavailable; launching fresh: ${message}`);
+			}
 		}
 		const selectedAgentNames = hasSingle
 			? [effectiveParams.agent!]
@@ -6859,6 +6999,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			sessionDirForIndex,
 			sessionFileForIndex: childSessionFileForIndex,
 			sessionFileForTask: childSessionFileForTask,
+			summaryBriefForTask,
 			thinkingOverrideForTask,
 			artifactConfig,
 			artifactsDir,

@@ -165,9 +165,25 @@ WorkflowScript calls use background execution when the request omits `async`. Se
 { "defaultSubagentContext": "fresh" }
 ```
 
-Sets `fresh` or `fork` for every subagent launch that omits `context`. This global preference replaces each agent-level `defaultContext`. Explicit `context: "fresh"` or `context: "fork"` still wins.
+Sets `fresh`, `fork`, or `summary` for every subagent launch that omits `context`. This global preference replaces each agent-level `defaultContext`. Explicit `context: "fresh"`, `context: "fork"`, or `context: "summary"` still wins.
 
-With `"fork"`, the setting uses the existing implicit-fork behavior. A launch starts fresh when the parent session file or current leaf is not available. `"fresh"` starts fresh even when the selected agent defaults to fork. Scheduled runs continue to set fresh context explicitly. A runner or provider that does not support fork context keeps its existing rejection behavior.
+With `"fork"` or `"summary"`, the setting uses the existing implicit behavior: a launch starts fresh when the parent session file or current leaf is not available, and any `summary` brief-generation failure falls back to fresh with a warning. `"fresh"` starts fresh even when the selected agent defaults to fork. Scheduled runs continue to set fresh context explicitly. A runner or provider that does not support fork context keeps its existing rejection behavior.
+
+## `summaryContext`
+
+```json
+{
+  "summaryContext": {
+    "model": "openai-codex/gpt-5.6-luna:max",
+    "maxBriefChars": 4096,
+    "maxInputChars": 100000
+  }
+}
+```
+
+Configures launches resolved to `context: "summary"`: the parent session is distilled into a role-directed context brief that is prepended to the child's task. Each field is optional; `model` defaults to the parent's own model, `maxBriefChars` to 4096, and `maxInputChars` (the transcript budget fed to the brief generator) to 100000. The child agent may declare a role-directed shaping instruction via the `contextBrief` frontmatter field to steer what the brief covers (for example a scout wants entry points and open questions, a reviewer wants decisions and diffs). Without one, a generic distillation instruction is used.
+
+Summary briefs never reuse Pi compaction summaries: the generator reads raw recent session history (user text, assistant text, tool-call names; thinking and tool-result bodies are skipped) newest-first up to the input budget, and calls the configured model once per agent with a strict JSON `{"brief":"..."}` contract. Any generation failure (missing parent session, unresolvable model, auth error, invalid JSON, budget overflow) falls back to a fresh launch for that child with a warning — it never aborts the run.
 
 ## `forkContext`
 

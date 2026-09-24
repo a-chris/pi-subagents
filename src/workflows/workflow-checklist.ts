@@ -13,7 +13,7 @@ export interface WorkflowChecklistStep {
 	phase?: string;
 	agent?: string;
 	status: string;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	activityState?: string;
 	startedAt?: number;
 	endedAt?: number;
@@ -53,7 +53,7 @@ export interface WorkflowChecklistItem {
 	phase: string;
 	state: WorkflowChecklistState;
 	agent?: string;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	startedAt?: number;
 	durationMs?: number;
 	currentTool?: string;

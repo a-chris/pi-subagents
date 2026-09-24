@@ -19,11 +19,11 @@ function writeSessionJsonl(filePath: string, entries: unknown[]): void {
 describe("resolveSubagentContext", () => {
 	it("defaults to fresh", () => {
 		assert.equal(resolveSubagentContext(undefined), "fresh");
-		assert.equal(resolveSubagentContext("anything"), "fresh");
 	});
 
-	it("accepts fork", () => {
+	it("accepts fork and summary", () => {
 		assert.equal(resolveSubagentContext("fork"), "fork");
+		assert.equal(resolveSubagentContext("summary"), "summary");
 	});
 });
 

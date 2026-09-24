@@ -122,7 +122,7 @@ You can override selected agent fields without copying the whole agent. Override
 }
 ```
 
-Supported override fields: `description`, `output`, `outputMode`, `defaultReads`, `model`, `defaultProvider`, `thinking`, `systemPromptMode`, `inheritProjectContext`, `inheritGlobalContext`, `inheritSkills`, `defaultContext`, `acceptanceRole`, `disabled`, `skills`, `tools`, and `systemPrompt`.
+Supported override fields: `description`, `output`, `outputMode`, `defaultReads`, `model`, `defaultProvider`, `thinking`, `systemPromptMode`, `inheritProjectContext`, `inheritGlobalContext`, `inheritSkills`, `defaultContext`, `contextBrief`, `acceptanceRole`, `disabled`, `skills`, `tools`, and `systemPrompt`.
 
 - `description` replaces the discovered description for builtin and custom agents, which lets list output show deployment-specific routing or model metadata.
 - Use `output: false`, `defaultReads: false`, `defaultContext: false`, or `acceptanceRole: false` to clear an inherited value.
@@ -161,6 +161,8 @@ Use these fields when an agent should see more:
 | `inheritGlobalContext: true` | Also keep the operator's global context file from the Pi config agent directory (such as `~/.pi/agent/AGENTS.md`). Defaults to `false`. |
 | `inheritSkills: true` | Let the child see Pi's discovered skills catalog. |
 | `defaultContext: fork` | Prefer forked session context when a launch omits `context`; if the parent has no persisted session file or current leaf yet, the implicit default falls back to `fresh` without a failed first attempt. Explicit `context: "fork"` remains strict, and explicit `context: "fresh"` still wins. |
+| `defaultContext: summary` | Prefer a role-directed context brief distilled from the parent session when a launch omits `context`. The brief is prepended to the child task; generation failures (or a missing persisted parent session) fall back to `fresh` with a warning and never abort the run. Explicit `context: "summary"` remains strict. |
+| `contextBrief` | Optional role-directed instruction shaping the agent's `summary` context brief (for example a scout wants entry points and open questions, a reviewer wants decisions and diffs). Absent, a generic distillation instruction is used. Declaring it does not enable summary mode — the mode is opt-in per launch, per `defaultContext`, or via `defaultSubagentContext`. |
 
 Builtin agents opt into repository instruction inheritance by default so they follow repo-specific rules out of the box, but global context remains excluded unless `inheritGlobalContext: true` is set. This changes the behavior of existing agents that previously received global context as part of `inheritProjectContext: true`. `delegate` also uses append mode because its job is orchestration inside the parent workflow.
 
@@ -231,7 +233,8 @@ Field notes:
 | `inheritProjectContext` | Keeps or strips inherited repository instruction blocks. |
 | `inheritGlobalContext` | Keeps or strips the operator's global context file from the Pi config agent directory (e.g. `~/.pi/agent/AGENTS.md`). It has an effect only when `inheritProjectContext` is `true`; otherwise all context files are already disabled. Defaults to `false`. |
 | `inheritSkills` | Keeps or strips Pi's discovered skills catalog. |
-| `defaultContext` | Optional `fresh` or `fork` launch-context preference. An implicit `fork` falls back to `fresh` when the parent has no persisted session file or current leaf; an explicit launch `context: "fork"` remains strict. |
+| `defaultContext` | Optional `fresh`, `fork`, or `summary` launch-context preference. Implicit `fork`/`summary` fall back to `fresh` when the parent has no persisted session file or current leaf; an explicit launch `context: "fork"`/`context: "summary"` remains strict. |
+| `contextBrief` | Optional role-directed instruction shaping a `summary` context brief for the agent. |
 | `skills` | Selects specific skills for the child, regardless of `inheritSkills`. |
 | `skillPath` | Invocation-private skill files or discovery directories. Relative paths resolve from the agent definition file. Local matches take precedence, while unresolved or unreadable matches fall back to normal skill discovery. This field discovers candidates only; `skills` still selects what the child receives. |
 | `output` | Default single-agent output file. |

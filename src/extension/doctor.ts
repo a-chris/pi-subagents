@@ -33,7 +33,7 @@ interface DoctorReportInput {
 	cwd: string;
 	config: ExtensionConfig;
 	state: SubagentState;
-	context?: "fresh" | "fork";
+	context?: "fresh" | "fork" | "summary";
 	requestedSessionDir?: string;
 	currentSessionFile?: string | null;
 	currentSessionId?: string | null;

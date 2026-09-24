@@ -1,12 +1,12 @@
-export type ContextMode = "fresh" | "fork";
+export type ContextMode = "fresh" | "fork" | "summary";
 export type ContextSummary = ContextMode | "mixed";
 
-export function isContextMode(value: unknown): value is ContextMode {
-	return value === "fresh" || value === "fork";
+export function isContextMode(value: ContextMode | undefined): value is ContextMode {
+	return value === "fresh" || value === "fork" || value === "summary";
 }
 
-export function isContextSummary(value: unknown): value is ContextSummary {
-	return isContextMode(value) || value === "mixed";
+export function isContextSummary(value: ContextSummary | undefined): value is ContextSummary {
+	return value === "fresh" || value === "fork" || value === "summary" || value === "mixed";
 }
 
 export function summarizeContextModes(modes: Array<ContextMode | undefined>): ContextSummary | undefined {
@@ -18,6 +18,7 @@ export function summarizeContextModes(modes: Array<ContextMode | undefined>): Co
 
 export function contextModeLabel(mode: ContextMode | ContextSummary | undefined): string {
 	if (mode === "fork") return "[fork]";
+	if (mode === "summary") return "[summary]";
 	if (mode === "fresh") return "[fresh]";
 	if (mode === "mixed") return "[mixed]";
 	return "";

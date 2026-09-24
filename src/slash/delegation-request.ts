@@ -65,8 +65,8 @@ export function parseSubagentDelegationRequest(data: unknown): SubagentDelegatio
 	if (unsupportedField) return { ok: false, ...identity, error: `Unsupported delegation field: ${unsupportedField}.` };
 	if (!nonEmptyString(value.agent)) return { ok: false, ...identity, error: "Delegation agent must be a non-empty string." };
 	if (!nonEmptyString(value.task)) return { ok: false, ...identity, error: "Delegation task must be a non-empty string." };
-	if (value.context !== "fresh" && value.context !== "fork") {
-		return { ok: false, ...identity, error: "Delegation context must be fresh or fork." };
+	if (value.context !== "fresh" && value.context !== "fork" && value.context !== "summary") {
+		return { ok: false, ...identity, error: "Delegation context must be fresh, fork, or summary." };
 	}
 	if (!nonEmptyString(value.cwd)) return { ok: false, ...identity, error: "Delegation cwd must be a non-empty string." };
 	if (value.model !== undefined && !nonEmptyString(value.model)) {
