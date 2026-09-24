@@ -23,6 +23,8 @@ import {
 import { serializeAgent } from "./agent-serializer.ts";
 import { mergeAgentsForScope } from "./agent-selection.ts";
 import { discoverAvailableSkills, resolveSkills } from "./skills.ts";
+import type { AvailableSkill } from "./proactive-skills.ts";
+import type { ProactiveSkillSubagentsConfig } from "../shared/types.ts";
 import {
 	buildProactiveSkillSubagentRecommendationLines,
 } from "./proactive-skills.ts";
@@ -405,6 +407,10 @@ function parseTools(raw: string): { tools?: string[]; mcpDirectTools?: string[] 
 	};
 }
 
+function isStringValue(value: unknown): value is string {
+	return Object.prototype.toString.call(value) === "[object String]";
+}
+
 function applyAgentConfig(target: AgentConfig, cfg: Record<string, unknown>): string | undefined {
 	if (hasKey(cfg, "advertise")) {
 		if (cfg.advertise === "") delete target.advertise;
@@ -686,9 +692,8 @@ function externalJobProviderSuffix(provider: string, names: Set<string> | undefi
 
 type ExternalCliAvailabilityByCommand = ReadonlyMap<string, ExternalCliBinaryAvailability>;
 
-/** A placed agent checks only local ssh; machine catalog and remote CLI validation happen at launch. */
-function externalCliAvailabilityKey(command: string, machine: string | undefined): string {
-	return machine ? `ssh@${machine}` : command;
+function externalCliAvailabilityKey(command: string): string {
+	return command;
 }
 
 function externalCliAvailabilityForAgents(agents: readonly AgentConfig[]): ExternalCliAvailabilityByCommand {
@@ -696,9 +701,9 @@ function externalCliAvailabilityForAgents(agents: readonly AgentConfig[]): Exter
 	for (const agent of agents) {
 		const runner = agent.runner;
 		if (runner?.type !== "external-cli") continue;
-		const key = externalCliAvailabilityKey(runner.command, agent.machine);
+		const key = externalCliAvailabilityKey(runner.command);
 		if (availability.has(key)) continue;
-		availability.set(key, resolveExternalCliBinaryAvailability(agent.machine ? "ssh" : runner.command, process.env));
+		availability.set(key, resolveExternalCliBinaryAvailability(runner.command, process.env));
 	}
 	return availability;
 }
@@ -706,13 +711,11 @@ function externalCliAvailabilityForAgents(agents: readonly AgentConfig[]): Exter
 function runnerListBadge(agent: AgentConfig, providerNames: Set<string> | undefined, externalCliAvailability?: ExternalCliAvailabilityByCommand): string | undefined {
 	if (agent.runner?.type === "external-job") return `external-job:${agent.runner.provider} ${externalJobProviderSuffix(agent.runner.provider, providerNames)}`;
 	if (agent.runner?.type === "external-cli") {
-		const placed = agent.machine ? `${agent.runner.command} @ ${agent.machine}` : agent.runner.command;
-		const availability = externalCliAvailability?.get(externalCliAvailabilityKey(agent.runner.command, agent.machine));
-		if (!availability) return `external-cli:${placed}`;
-		if (agent.machine) return `external-cli:${placed} saved Herdr placement; transport ${availability.available ? "✓" : "missing"}; machine not preflighted`;
-		return `external-cli:${placed} ${availability.available ? "✓" : "missing"}`;
+		const command = agent.runner.command;
+		const availability = externalCliAvailability?.get(externalCliAvailabilityKey(command));
+		if (!availability) return `external-cli:${command}`;
+		return `external-cli:${command} ${availability.available ? "✓" : "missing"}`;
 	}
-	if (agent.machine) return `machine: ${agent.machine} (saved Herdr placement)`;
 	return undefined;
 }
 
@@ -748,9 +751,8 @@ function formatAgentCapabilitiesLine(agent: AgentConfig, providerNames: Set<stri
 		if (agent.modelProvider && !agent.model.includes("/")) model = `${agent.modelProvider}/${agent.model}`;
 	}
 	const thinking = agent.thinking === false ? "off" : agent.thinking ?? "default";
-	const machine = agent.machine ? `; Machine: ${agent.machine} (saved Herdr placement)` : "";
 	const acceptance = formatAcceptanceSummary(agent);
-	return `- ${agent.name} (${agentListMetadata(agent, providerNames, externalCliAvailability)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: ${model}; Thinking: ${thinking}${machine}${acceptance ? `; ${acceptance}` : ""}`;
+	return `- ${agent.name} (${agentListMetadata(agent, providerNames, externalCliAvailability)}): Description: ${previewDisplayText(agent.description, 240)}; Tools: ${tools}; Model: ${model}; Thinking: ${thinking}${acceptance ? `; ${acceptance}` : ""}`;
 }
 
 function formatAcceptanceSummary(agent: AgentConfig): string | undefined {
@@ -794,12 +796,10 @@ function agentCapabilityRunner(agent: AgentConfig, providerNames: Set<string> | 
 	const runner = agent.runner;
 	if (!runner || runner.type === "pi") return PI_AGENT_RUNNER;
 	if (runner.type === "external-cli") {
-		const availability = externalCliAvailability.get(externalCliAvailabilityKey(runner.command, agent.machine))!;
+		const availability = externalCliAvailability.get(externalCliAvailabilityKey(runner.command))!;
 		return {
 			type: "external-cli",
-			adapter: runner.adapter,
 			command: runner.command,
-			...(agent.machine ? { machine: agent.machine } : {}),
 			...availability,
 			capabilities: resolveExternalCliRunnerStatus(runner).capabilities,
 		};
@@ -808,13 +808,14 @@ function agentCapabilityRunner(agent: AgentConfig, providerNames: Set<string> | 
 }
 
 function agentCapabilityTools(agent: AgentConfig): AgentCapabilityRow["tools"] {
-	return {
+	const tools: AgentCapabilityRow["tools"] = {
 		ambient: agent.tools === undefined && agent.mcpDirectTools === undefined,
 		names: listOrEmpty(agent.tools),
-		...(agent.excludeTools !== undefined ? { excludeTools: [...agent.excludeTools] } : {}),
 		mcpDirectTools: listOrEmpty(agent.mcpDirectTools),
 		mutationTools: agent.mutationTools,
 	};
+	if (agent.excludeTools !== undefined) tools.excludeTools = [...agent.excludeTools];
+	return tools;
 }
 
 function agentCapabilityRow(agent: AgentConfig, options: { executable: boolean; providerNames?: Set<string>; externalCliAvailability: ExternalCliAvailabilityByCommand; restrictionSources?: string[] }): AgentCapabilityRow {
@@ -836,14 +837,15 @@ function agentCapabilityRow(agent: AgentConfig, options: { executable: boolean; 
 }
 
 function agentCapabilitiesSnapshot(input: { agents: AgentConfig[]; restrictedAgents: AgentConfig[]; providerNames?: Set<string>; externalCliAvailability: ExternalCliAvailabilityByCommand; restrictedSources?: string[] }): AgentCapabilitiesSnapshot {
-	return {
+	const snapshot: AgentCapabilitiesSnapshot = {
 		agents: [
 			...input.agents.map((agent) => agentCapabilityRow(agent, { executable: true, providerNames: input.providerNames, externalCliAvailability: input.externalCliAvailability })),
 			...input.restrictedAgents.map((agent) => agentCapabilityRow(agent, { executable: false, providerNames: input.providerNames, externalCliAvailability: input.externalCliAvailability, restrictionSources: input.restrictedSources })),
 		],
 		restrictedCount: input.restrictedAgents.length,
-		...(input.restrictedSources?.length ? { capabilityCeilingSources: [...input.restrictedSources] } : {}),
 	};
+	if (input.restrictedSources?.length) snapshot.capabilityCeilingSources = [...input.restrictedSources];
+	return snapshot;
 }
 
 function providerNames(status: ExternalJobProviderStatus): Set<string> | undefined {
@@ -947,7 +949,7 @@ function formatAgentDetail(agent: AgentConfig): string {
 	if (agent.defaultContext) lines.push(`Default context: ${agent.defaultContext}`);
 	if (agent.defaultAsync !== undefined) lines.push(`Async: ${agent.defaultAsync ? "true" : "false"}`);
 	if (agent.defaultTimeoutMs !== undefined) lines.push(`Timeout: ${agent.defaultTimeoutMs}ms`);
-	if (agent.defaultAcceptance !== undefined) lines.push(`Acceptance: ${typeof agent.defaultAcceptance === "object" ? JSON.stringify(agent.defaultAcceptance) : String(agent.defaultAcceptance)}`);
+	if (agent.defaultAcceptance !== undefined) lines.push(`Acceptance: ${agent.defaultAcceptance instanceof Object ? JSON.stringify(agent.defaultAcceptance) : String(agent.defaultAcceptance)}`);
 	if (agent.acceptanceRole) lines.push(`Acceptance role: ${agent.acceptanceRole}`);
 	if (agent.source === "builtin") lines.push(`Disabled: ${agent.disabled ? "true" : "false"}`);
 	if (agent.extensions !== undefined) lines.push(`Extensions: ${agent.extensions.length ? agent.extensions.join(", ") : "(none)"}`);
@@ -977,11 +979,12 @@ export function handleList(params: ManagementParams, ctx: ManagementContext): Ag
 	const agents = visibleAgents.filter((a) => isAgentAllowedByCapabilityCeiling(a.name, capabilityCeiling));
 	const restrictedAgents = visibleAgents.filter((a) => !isAgentAllowedByCapabilityCeiling(a.name, capabilityCeiling));
 	const restrictedSources = capabilityCeilingAgentRestrictionSources(capabilityCeiling);
-	const proactiveSuggestions = buildProactiveSkillSubagentRecommendationLines({
+	const proactiveInput: { agents: AgentConfig[]; config?: ProactiveSkillSubagentsConfig | false; discoverAvailableSkills: () => AvailableSkill[] } = {
 		agents,
-		...(ctx.config?.proactiveSkillSubagents !== undefined ? { config: ctx.config.proactiveSkillSubagents } : {}),
 		discoverAvailableSkills: () => discoverAvailableSkills(ctx.cwd),
-	});
+	};
+	if (ctx.config?.proactiveSkillSubagents !== undefined) proactiveInput.config = ctx.config.proactiveSkillSubagents;
+	const proactiveSuggestions = buildProactiveSkillSubagentRecommendationLines(proactiveInput);
 	const providerStatus = registeredExternalJobProviderStatus();
 	const providerNameSet = providerNames(providerStatus);
 	const capabilityMode = params.capabilities === true;
@@ -1141,7 +1144,7 @@ export function handleCreate(params: ManagementParams, ctx: ManagementContext): 
 	if (parsedConfig.status === "error") return result(parsedConfig.message, true);
 	if (parsedConfig.status === "missing") return result("config required for create.", true);
 	const cfg = parsedConfig.value;
-	if (typeof cfg.name !== "string" || !cfg.name.trim()) return result("config.name is required and must be a non-empty string.", true);
+	if (!isStringValue(cfg.name) || !cfg.name.trim()) return result("config.name is required and must be a non-empty string.", true);
 	if (typeof cfg.description !== "string" || !cfg.description.trim()) return result("config.description is required and must be a non-empty string.", true);
 	const name = sanitizeName(cfg.name);
 	if (!name) return result("config.name is invalid after sanitization. Use letters, numbers, spaces, or hyphens.", true);
@@ -1164,7 +1167,6 @@ export function handleCreate(params: ManagementParams, ctx: ManagementContext): 
 	const agent: AgentConfig = {
 		name: runtimeName,
 		localName: name,
-		...(parsedPackage.packageName !== undefined ? { packageName: parsedPackage.packageName } : {}),
 		description: cfg.description.trim(),
 		source: scope,
 		filePath: targetPath,
@@ -1174,6 +1176,7 @@ export function handleCreate(params: ManagementParams, ctx: ManagementContext): 
 		inheritGlobalContext: false,
 		inheritSkills: defaultInheritSkills(),
 	};
+	if (parsedPackage.packageName !== undefined) agent.packageName = parsedPackage.packageName;
 	const applyError = applyAgentConfig(agent, cfg);
 	if (applyError) return result(applyError, true);
 	const mw = modelWarning(ctx, agent.model);
@@ -1206,10 +1209,11 @@ export function handleUpdate(params: ManagementParams, ctx: ManagementContext): 
 		return result(`Could not reread agent definition ${target.filePath} before updating '${target.name}': ${message}`, true);
 	}
 	const oldName = target.name;
-	if (hasKey(cfg, "name") && (typeof cfg.name !== "string" || !cfg.name.trim())) return result("config.name must be a non-empty string when provided.", true);
+	if (hasKey(cfg, "name") && (!isStringValue(cfg.name) || !cfg.name.trim())) return result("config.name must be a non-empty string when provided.", true);
 	if (hasKey(cfg, "description") && (typeof cfg.description !== "string" || !cfg.description.trim())) return result("config.description must be a non-empty string when provided.", true);
 	let newLocalName = target.localName ?? frontmatterNameForConfig(target);
 	if (hasKey(cfg, "name")) {
+		// SAFETY: 'name' in cfg was validated as a non-empty string by the guard above.
 		newLocalName = sanitizeName(cfg.name as string);
 		if (!newLocalName) return result("config.name is invalid after sanitization.", true);
 	}
@@ -1226,7 +1230,10 @@ export function handleUpdate(params: ManagementParams, ctx: ManagementContext): 
 	if (newPackageName !== undefined) updated.packageName = newPackageName;
 	else delete updated.packageName;
 	updated.name = buildRuntimeName(newLocalName, newPackageName);
-	if (hasKey(cfg, "description")) updated.description = (cfg.description as string).trim();
+	if (hasKey(cfg, "description")) {
+		// SAFETY: management config values are validated as strings at the request boundary.
+		updated.description = (cfg.description as string).trim();
+	}
 	if (hasKey(cfg, "model")) {
 		const mw = modelWarning(ctx, updated.model);
 		if (mw) warnings.push(mw);
@@ -1378,8 +1385,8 @@ function handleReset(params: ManagementParams, ctx: ManagementContext): AgentToo
 		fs.unlinkSync(custom.filePath);
 		lines.push(`Deleted custom ${scope} agent file at ${custom.filePath}.`);
 	}
-	const overrideRemoval = removeBuiltinAgentOverride(ctx.cwd, runtimeName, scope, { preserveMachine: true });
-	if (overrideRemoval.removed) lines.push(`${overrideRemoval.machinePreserved ? "Cleared customization in" : "Removed"} ${scope} settings override at ${overrideRemoval.path}.${overrideRemoval.machinePreserved ? " Retained machine placement." : ""}`);
+	const overrideRemoval = removeBuiltinAgentOverride(ctx.cwd, runtimeName, scope);
+	if (overrideRemoval.removed) lines.push(`Removed ${scope} settings override at ${overrideRemoval.path}.`);
 	if (lines.length === 0) {
 		const otherScope = scope === "user" ? "project" : "user";
 		const otherCustom = (otherScope === "user" ? d.user : d.project).find((a) => a.name === raw || a.name === sanitized);

@@ -22,10 +22,6 @@ function parseStepBody(agent: string, sectionBody: string): ChainStepConfig {
 		const key = keyValue.trim().toLowerCase();
 		const rawValue = rawValueValue.trim();
 
-		if (key === "machine") {
-			if (rawValue) step.machine = rawValue;
-			continue;
-		}
 		if (key === "output") {
 			if (rawValue === "false") step.output = false;
 			else if (rawValue) step.output = rawValue;
@@ -261,7 +257,6 @@ export function serializeChain(config: ChainConfig): string {
 	for (let i = 0; i < config.steps.length; i++) {
 		const step = config.steps[i]!;
 		lines.push(`## ${step.agent}`);
-		if (step.machine) lines.push(`machine: ${step.machine}`);
 		if (step.output === false) lines.push("output: false");
 		else if (step.output) lines.push(`output: ${step.output}`);
 		if (step.phase) lines.push(`phase: ${step.phase}`);

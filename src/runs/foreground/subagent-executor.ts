@@ -100,7 +100,6 @@ import { inspectSubagentStatus } from "../background/run-status.ts";
 import { getExternalJobProvider } from "../../api/external-job-provider.ts";
 import { externalJobFollowUpRequestDigest, externalJobFollowUpRequestId, externalJobFollowUpRunId, externalJobPromptDigest, externalJobStableJson } from "../shared/external-job-runner.ts";
 import { externalCliReceiptMetadata, normalizeExternalCliRunnerStatus } from "../shared/external-cli-contract.ts";
-import { formatHerdrMachineRunnerUnsupported, resolveHerdrMachinePlacement } from "../shared/herdr-machine.ts";
 import { applyForceTopLevelAsyncOverride } from "../background/top-level-async.ts";
 import { handleMissionAction, MISSION_ACTIONS } from "../../missions/actions.ts";
 import { attachMissionToLaunchResult, prepareMissionLaunch, writeMissionAsyncBinding, type MissionLaunchBinding } from "../../missions/lifecycle.ts";
@@ -110,8 +109,7 @@ import { createMissionWorkflowState } from "../../missions/workflow-state.ts";
 import { resolveAuthorityDecision } from "../../policy/authority.ts";
 import { handleInspectorAction, INSPECTOR_ACTIONS } from "../../inspectors/actions.ts";
 import { createBuiltinInspectorPlugins } from "../../inspectors/plugins.ts";
-import { handleHerdrProjectPaneAction, HERDR_PROJECT_PANE_ACTIONS } from "../../inspectors/herdr/project-panes.ts";
-import { previewSimpleWorkflowRun, runWorkflowScript, validateWorkflowScript, WorkflowScriptError, type WorkflowChildSettledNotification, type WorkflowLanePlan, type WorkflowReceiptResumeReference, type WorkflowScriptChildResult, type WorkflowScriptTraceEntry, type WorkflowSteerOptions, type WorkflowSteerResult } from "../../workflows/scripted-workflow.ts";
+import { previewSimpleWorkflowRun, runWorkflowScript, validateWorkflowScript, WorkflowScriptError, type WorkflowLanePlan, type WorkflowReceiptResumeReference, type WorkflowScriptChildResult, type WorkflowScriptTraceEntry, type WorkflowSteerOptions, type WorkflowSteerResult } from "../../workflows/scripted-workflow.ts";
 import { formatIncrementalChildCompletion, incrementalChildCompletionTriggersTurn } from "../background/notify.ts";
 import { executeWorkflowHostCommand, resolveWorkflowHostOutputClaimPath, type WorkflowHostCommandParams, type WorkflowHostCommandResult } from "../../workflows/host-command.ts";
 import { buildWorkflowReceipt, readWorkflowReceipt, workflowReceiptPath, resolveWorkflowReceiptResumeEntry, writeWorkflowReceipt, type WorkflowReceipt, type WorkflowReceiptState } from "../../workflows/workflow-receipt.ts";
@@ -290,7 +288,6 @@ interface TaskParam {
 	agent: string;
 	task: string;
 	cwd?: string;
-	machine?: string;
 	count?: number;
 	output?: string | boolean;
 	outputMode?: "inline" | "file-only";
@@ -384,9 +381,6 @@ export interface SubagentParamsLike {
 	control?: ControlConfig;
 	sessionDir?: string;
 	cwd?: string;
-	machine?: string;
-	/** Internal: the typed cwd when a machine is set, kept as a remote path and never resolved locally. */
-	machineCwd?: string;
 	maxOutput?: MaxOutputConfig;
 	artifacts?: boolean;
 	includeProgress?: boolean;
@@ -2283,8 +2277,6 @@ function canonicalizeExecutionParams(params: SubagentParamsLike, agents: AgentCo
 		params = omitUndefinedProperties({ ...params, agent: result.name });
 		const agent = agents.find((candidate) => candidate.name === result.name);
 		if (params.extensionBindings !== undefined && (agent?.runner?.type === "external-cli" || agent?.runner?.type === "external-job")) return { error: `extensionBindings is not supported for runner.type='${agent.runner.type}'.` };
-		const machineError = agent ? formatHerdrMachineRunnerUnsupported({ machine: params.machine ?? agent.machine, agentName: agent.name, runnerType: agent.runner?.type, worktree: params.worktree }) : undefined;
-		if (machineError) return { error: machineError };
 	}
 	if (params.extensionBindings !== undefined) {
 		try {
@@ -3184,8 +3176,6 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			availableModels,
 			cwd: effectiveCwd,
 			requestedCwd: data.requestedCwd,
-			machine: params.machine,
-			machineCwd: params.machineCwd,
 			maxOutput: params.maxOutput,
 			artifactsDir: artifactConfig.enabled ? artifactsDir : undefined,
 			artifactConfig,
@@ -3353,13 +3343,6 @@ export function resolveWorkflowChildLocalCwd(input: {
 	workflowAgentScope?: unknown;
 	params: Record<string, unknown>;
 }): string {
-	if (input.params.machine !== undefined) return input.workflowCwd;
-	if (typeof input.params.agent === "string") {
-		const agentScope = resolveExecutionAgentScope(input.params.agentScope ?? input.workflowAgentScope);
-		const workflowAgents = input.discoverAgents(input.workflowCwd, agentScope).agents;
-		const agent = resolveAgentName(input.params.agent, workflowAgents).agent ?? resolveAgentName(input.params.agent, input.agents).agent;
-		if (agent?.machine !== undefined) return input.workflowCwd;
-	}
 	return typeof input.params.cwd === "string" ? resolveChildCwd(input.workflowCwd, input.params.cwd) : input.workflowCwd;
 }
 
@@ -3611,12 +3594,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			details: { mode: "single", results: [] },
 		};
 	}
-	let foregroundMachine: import("../../shared/types.ts").HerdrMachineReference | undefined;
-	const requestedMachine = params.machine ?? agentConfig.machine;
-	if (requestedMachine) {
-		try { foregroundMachine = resolveHerdrMachinePlacement({ machine: requestedMachine, cwd: ctx.cwd, stepCwd: params.machineCwd }).machine; }
-		catch (error) { return toExecutionErrorResult(params, error instanceof Error ? error : new Error(String(error)), data.contextPolicy.contextSummary); }
-	}
 	const effectiveToolBudget = resolveEffectiveToolBudget(omitUndefinedProperties({ runBudget: data.toolBudget, agentBudget: agentConfig.toolBudget, configBudget: data.configToolBudget }));
 	if (effectiveToolBudget.error) return toExecutionErrorResult(params, new Error(effectiveToolBudget.error), data.contextPolicy.contextSummary);
 
@@ -3654,7 +3631,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	const maxSubagentDepth = resolveChildMaxSubagentDepth(currentMaxSubagentDepth, agentConfig.maxSubagentDepth);
 
 
-	const sourceCwd = foregroundMachine?.cwd ?? effectiveCwd;
+	const sourceCwd = effectiveCwd;
 	let pendingHandoff: Details["parallelHandoff"];
 	const { setup: worktreeSetup, errorResult: worktreeSetupError } = params.worktree ? await createSingleWorktreeSetup(
 		sourceCwd,
@@ -3731,7 +3708,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	// Reads: caller override > agent defaultReads > none. `~`/`~/` expand to home;
 	// absolute paths pass through; relative paths resolve against the child cwd.
 	const reads = readsOverride !== undefined ? readsOverride : agentConfig.defaultReads ?? false;
-	const readPaths = !foregroundMachine && Array.isArray(reads) ? resolveExistingReadPaths(reads, singleCwd) : [];
+	const readPaths = Array.isArray(reads) ? resolveExistingReadPaths(reads, singleCwd) : [];
 	const readsInstruction = readPaths.length > 0
 		? `[Read from: ${readPaths.join(", ")}]\n\n`
 		: "";
@@ -3802,9 +3779,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		: undefined;
 	try {
 		const launched = await runSync(ctx.cwd, agents, params.agent!, task, compactOptional<Parameters<typeof runSync>[4]>({
-			machine: foregroundMachine,
 			parentProviderRegistry: ctx.modelRegistry,
-			remoteReads: foregroundMachine ? readsOverride : undefined,
 			permissions: deps.config.permissions,
 			runtimeSnapshotHost: deps.pi,
 			hostAvailableBuiltins: getHostBuiltinToolNames(deps.pi),
@@ -4702,7 +4677,6 @@ function createScheduledOwnerState(source: SubagentState, ownerSessionId: string
 		parentSessionFile: ctx.sessionManager.getSessionFile() ?? null,
 		subagentInProgress: false,
 		...(ownerSpawns ? { subagentSpawns: ownerSpawns } : { subagentSpawns: undefined }),
-		herdrProjectPanes: new Map(),
 		asyncJobs: new Map(),
 		fleetJobs: new Map(),
 		foregroundRuns: new Map(),
@@ -5937,24 +5911,10 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			}
 		}
 		const directParams = requestParams;
-		// With a machine, cwd names a directory on that machine: keep it out of every local path resolution.
-		// Placement can also come from the agent's frontmatter or settings override, so the agent is resolved first (discovery is fingerprint-cached).
-		const placedByAgent = (): boolean => {
-			if (directParams.machine !== undefined || directParams.cwd === undefined || typeof directParams.agent !== "string") return false;
-			try {
-				return resolveAgentName(directParams.agent, deps.discoverAgents(ctx.cwd, resolveExecutionAgentScope(directParams.agentScope)).agents).agent?.machine !== undefined;
-			} catch {
-				return false; // Discovery errors surface from the launch path itself.
-			}
-		};
-		const remotePlacement = directParams.action === undefined && (directParams.machine !== undefined || placedByAgent());
-		const requestedCwd = remotePlacement ? undefined : directParams.cwd;
-		const requestCwd = remotePlacement ? ctx.cwd : resolveRequestedCwd(ctx.cwd, directParams.cwd);
+		const requestCwd = resolveRequestedCwd(ctx.cwd, directParams.cwd);
 		const paramsWithResolvedCwd = directParams.cwd === undefined
 			? directParams
-			: remotePlacement
-				? omitUndefinedProperties({ ...directParams, cwd: undefined, machineCwd: directParams.cwd })
-				: { ...directParams, cwd: requestCwd };
+			: { ...directParams, cwd: requestCwd };
 		const action = paramsWithResolvedCwd.action;
 		let requestSessionId = "";
 		let requestPiSessionId: string | undefined;
@@ -6070,13 +6030,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					const confirmed = await ctx.ui.confirm(`Authorize subagent ${action}?`, `Authority policy requires confirmation before '${action}'.`);
 					if (!confirmed) return { content: [{ type: "text", text: `Action '${action}' canceled; authority was not granted.` }], details: { mode: "management", results: [] } };
 				}
-			}
-			if ((HERDR_PROJECT_PANE_ACTIONS as readonly string[]).includes(action)) {
-				if (deps.allowMutatingManagementActions === false && MUTATING_MANAGEMENT_ACTIONS.has(action)) {
-					return { content: [{ type: "text", text: `Action '${action}' is not available from child-safe subagent fanout mode.` }], isError: true, details: { mode: "management", results: [] } };
-				}
-				deps.state.currentSessionId = resolveCurrentSessionId(ctx.sessionManager);
-				return handleHerdrProjectPaneAction(action as (typeof HERDR_PROJECT_PANE_ACTIONS)[number], paramsWithResolvedCwd, { cwd: requestCwd, state: deps.state, signal });
 			}
 			if ((INSPECTOR_ACTIONS as readonly string[]).includes(action)) {
 				if (deps.allowMutatingManagementActions === false && MUTATING_MANAGEMENT_ACTIONS.has(action)) {
@@ -6893,7 +6846,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		const execData: ExecutionContextData = omitUndefinedProperties({
 			params: effectiveParams,
 			effectiveCwd,
-			requestedCwd,
+			requestedCwd: effectiveCwd,
 			ctx,
 			signal,
 			onUpdate: onUpdateWithContext,

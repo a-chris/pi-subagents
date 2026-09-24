@@ -817,16 +817,16 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		}
 	});
 
-	it("does not apply the per-tool timeout to supervisor tools (contact_supervisor/intercom)", { skip: !isAsyncAvailable() ? "jiti not available" : process.platform === "win32" ? "timeout signal delivery intermittent on Windows CI" : undefined }, async () => {
-		// contact_supervisor holds ~1.5s — longer than the 1s per-tool budget — but
+	it("does not apply the per-tool timeout to the wait tool", { skip: !isAsyncAvailable() ? "jiti not available" : process.platform === "win32" ? "timeout signal delivery intermittent on Windows CI" : undefined }, async () => {
+		// bg_wait holds ~1.5s — longer than the 1s per-tool budget — but
 		// is allowlisted, so the per-tool timer must not fire.
 		mockPi.onCall({
 			steps: [
 				{
 					delay: 1500,
 					jsonl: [
-						events.toolStart("contact_supervisor"),
-						events.toolEnd("contact_supervisor"),
+						events.toolStart("bg_wait"),
+						events.toolEnd("bg_wait"),
 						events.assistantMessage("done"),
 						{ type: "agent_end", willRetry: false },
 						{ type: "agent_settled" },

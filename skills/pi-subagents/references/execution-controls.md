@@ -486,7 +486,7 @@ The intended oracle loop is:
 
 1. the main agent forks to `oracle`
 2. `oracle` reviews direction, drift, assumptions, and risks
-3. `oracle` can coordinate back through `contact_supervisor` when the bridge injects it
+3. `oracle` reports blocked or needs-attention status through the parent session
 4. the main agent decides what direction to approve
 5. only then should `worker` implement
 

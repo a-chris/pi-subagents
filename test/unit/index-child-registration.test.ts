@@ -613,58 +613,7 @@ describe("subagent extension child mode", () => {
 		}
 	});
 
-	it("restores indexed active status after a management tool result", () => {
-		const script = String.raw`
-			import * as fs from "node:fs";
-			import * as path from "node:path";
-			import registerSubagentExtension from "./index.ts";
-			import { updateActiveRunIndex } from "./src/runs/background/active-run-index.ts";
-			import { DIRS } from "./src/shared/types.ts";
-			const eventHandlers = new Map();
-			const handlers = new Map();
-			const events = { on(channel, handler) { eventHandlers.set(channel, handler); return () => {}; }, emit() {} };
-			const widgets = [];
-			const herdrCommands = [];
-			process.env.HERDR_ENV = "1";
-			process.env.HERDR_PANE_ID = "w1:p1";
-			const fakePi = new Proxy({
-				events,
-				on(channel, handler) { handlers.set(channel, [...(handlers.get(channel) ?? []), handler]); },
-				exec(command, args) { herdrCommands.push({ command, args }); return Promise.resolve({ code: 0, stdout: "", stderr: "", killed: false }); },
-				registerTool() {}, registerCommand() {}, registerShortcut() {}, registerMessageRenderer() {},
-				sendMessage() {}, getSessionName() { return undefined; },
-			}, { get(target, prop) { return prop in target ? target[prop] : () => undefined; } });
-			const runId = "management-refresh-" + crypto.randomUUID();
-			const sessionId = "session-" + runId;
-			const ctx = {
-				cwd: process.cwd(), hasUI: true,
-				ui: { setWidget(key, value) { widgets.push({ key, value }); }, requestRender() {}, theme: { fg(_name, text) { return text; }, bg(_name, text) { return text; }, bold(text) { return text; } } },
-				sessionManager: { getSessionId() { return sessionId; }, getSessionFile() { return null; }, getEntries() { return []; } },
-				modelRegistry: { getAvailable() { return []; } },
-			};
-			const asyncDir = path.join(DIRS.async, runId);
-			fs.rmSync(asyncDir, { recursive: true, force: true });
-			registerSubagentExtension(fakePi);
-			for (const handler of handlers.get("session_start")) await handler({}, ctx);
-			widgets.length = 0;
-			fs.mkdirSync(asyncDir, { recursive: true });
-			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({
-				runId, sessionId, mode: "workflow", state: "running",
-				startedAt: Date.now(), lastUpdate: Date.now(), cwd: process.cwd(), pid: process.pid,
-			}), "utf-8");
-			updateActiveRunIndex(asyncDir, "running");
-			for (const handler of handlers.get("tool_result")) await handler({ toolName: "subagent" }, ctx);
-			const fleetWidgets = widgets.filter((entry) => entry.key === "subagent-fleet-status");
-			if (!fleetWidgets.some((entry) => typeof entry.value === "function")) throw new Error("management result did not restore active fleet status: " + JSON.stringify(fleetWidgets));
-			if (!herdrCommands.some(({ args }) => args.includes("summary=⏳ 1 subagent"))) throw new Error("management result did not restore Herdr status: " + JSON.stringify(herdrCommands));
-			const herdrCommandCount = herdrCommands.length;
-			for (const handler of handlers.get("tool_result")) await handler({ toolName: "subagent" }, ctx);
-			if (herdrCommands.length !== herdrCommandCount) throw new Error("unchanged active jobs redundantly refreshed Herdr status: " + JSON.stringify(herdrCommands));
-			for (const handler of handlers.get("session_shutdown")) await handler();
-			fs.rmSync(asyncDir, { recursive: true, force: true });
-		`;
-		execFileSync(process.execPath, ["--experimental-strip-types", "--import", "./test/support/register-loader.mjs", "--input-type=module", "--eval", script], { cwd: projectRoot, env: parentToolEnv(), stdio: "pipe" });
-	});
+
 
 	it("registers pi-web liveness for the current session and releases it on shutdown", () => {
 		const script = String.raw`

@@ -216,8 +216,8 @@ export function createWaitSubscriptionManager(
 				return;
 			}
 			const detached = run.children.filter((child) => child.status === "detached");
-			if (detached.some((child) => child.activityState === "needs_attention" && child.currentTool === "contact_supervisor")) {
-				settle(record, "needs attention", "Reply to the pending supervisor request or inspect the run status.");
+			if (detached.some((child) => child.activityState === "needs_attention")) {
+				settle(record, "needs attention", "Inspect the run status and resolve what needs attention.");
 				return;
 			}
 			if (detached.length === 0) {
@@ -241,7 +241,7 @@ export function createWaitSubscriptionManager(
 			return;
 		}
 		if (needsAttention(run)) {
-			settle(record, "needs attention", "Inspect the run status and answer any pending supervisor request.");
+			settle(record, "needs attention", "Inspect the run status and resolve what needs attention.");
 			return;
 		}
 		if (run.state !== "queued" && run.state !== "running") {

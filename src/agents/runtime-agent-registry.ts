@@ -36,7 +36,6 @@ export interface RuntimeAgentDefinition {
 	defaultAcceptance?: AcceptanceInput;
 	acceptanceRole?: AcceptanceRole;
 	runner?: AgentRunnerConfig;
-	machine?: string;
 	skills?: readonly string[];
 	skillPath?: readonly string[];
 	extensions?: readonly string[];
@@ -200,7 +199,7 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	const supported = new Set([
 		"description", "systemPrompt", "aliases", "tools", "excludeTools", "allowNestedSubagents", "mcpDirectTools", "model", "thinking",
 		"systemPromptMode", "inheritProjectContext", "inheritGlobalContext", "inheritSkills", "defaultContext", "defaultAsync", "defaultTimeoutMs",
-		"defaultToolTimeoutMs", "defaultAcceptance", "acceptanceRole", "runner", "machine", "skills", "skillPath",
+		"defaultToolTimeoutMs", "defaultAcceptance", "acceptanceRole", "runner", "skills", "skillPath",
 		"extensions", "subagentOnlyExtensions", "mutationTools", "output", "outputMode", "defaultReads", "defaultProgress", "interactive",
 		"maxSubagentDepth", "completionGuard", "toolBudget", "permissions",
 	]);
@@ -236,7 +235,6 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 	const extensions = validateStringList(definition.extensions, "Runtime agent definition extensions");
 	const subagentOnlyExtensions = validateStringList(definition.subagentOnlyExtensions, "Runtime agent definition subagentOnlyExtensions");
 	const mutationTools = validateStringList(definition.mutationTools, "Runtime agent definition mutationTools");
-	const machine = validateOptionalString(definition.machine, "Runtime agent definition machine");
 	const output = validateOptionalString(definition.output, "Runtime agent definition output");
 	const defaultReads = validateStringList(definition.defaultReads, "Runtime agent definition defaultReads");
 	const defaultProgress = validateBoolean(definition.defaultProgress, "Runtime agent definition defaultProgress");
@@ -271,7 +269,6 @@ function validateDefinition(value: unknown): RuntimeAgentDefinition {
 		...(extensions ? { extensions } : {}),
 		...(subagentOnlyExtensions ? { subagentOnlyExtensions } : {}),
 		...(mutationTools ? { mutationTools } : {}),
-		...(machine ? { machine } : {}),
 		...(output ? { output } : {}),
 		...(outputMode !== undefined ? { outputMode: outputMode as OutputMode } : {}),
 		...(defaultReads ? { defaultReads } : {}),
@@ -353,7 +350,6 @@ function toAgentConfig(name: string, definition: RuntimeAgentDefinition): AgentC
 		...(definition.extensions !== undefined ? { extensions: [...definition.extensions] } : {}),
 		...(definition.subagentOnlyExtensions !== undefined ? { subagentOnlyExtensions: [...definition.subagentOnlyExtensions] } : {}),
 		...(definition.mutationTools !== undefined ? { mutationTools: [...definition.mutationTools] } : {}),
-		...(definition.machine !== undefined ? { machine: definition.machine } : {}),
 		...(definition.output !== undefined ? { output: definition.output } : {}),
 		...(definition.outputMode !== undefined ? { outputMode: definition.outputMode } : {}),
 		...(definition.defaultReads !== undefined ? { defaultReads: [...definition.defaultReads] } : {}),

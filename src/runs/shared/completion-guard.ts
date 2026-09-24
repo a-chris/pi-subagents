@@ -14,8 +14,6 @@ const READ_ONLY_BUILTIN_TOOLS = new Set([
 	"fetch_content",
 	"get_search_content",
 	"source_check",
-	"intercom",
-	"contact_supervisor",
 	"structured_output",
 ]);
 

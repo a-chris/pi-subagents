@@ -103,7 +103,6 @@ describe("agent management config parsing", () => {
 			"mutationTools: edit, write",
 			"output: report.md",
 			"outputMode: file-only",
-			"machine: workmac",
 			"---",
 			"SYSTEM_PROMPT_SENTINEL",
 			"---",
@@ -117,7 +116,7 @@ describe("agent management config parsing", () => {
 		assert.equal(listed.isError, false);
 		const text = readText(listed);
 		assert.match(text, /^Executable agents \(capabilities\):/);
-		assert.match(text, /- capability-worker \(project, machine: workmac \(saved Herdr placement\), aliases: capability\): Description: Capability worker; Tools: read, grep, mcp:github\/search; Model: openai\/gpt-5-mini; Thinking: high; Machine: workmac \(saved Herdr placement\); Acceptance: checked \(changed-files, commands-run, verify: "unit", criteria: 2, stopRules: 1, review: required by "reviewer", report: on\); Acceptance role: writer/);
+		assert.match(text, /- capability-worker \(project, aliases: capability\): Description: Capability worker; Tools: read, grep, mcp:github\/search; Model: openai\/gpt-5-mini; Thinking: high; Acceptance: checked \(changed-files, commands-run, verify: "unit", criteria: 2, stopRules: 1, review: required by "reviewer", report: on\); Acceptance role: writer/);
 		assert.doesNotMatch(text, /unsupported for native agents/u);
 		assert.doesNotMatch(text, /System Prompt:|SYSTEM_PROMPT_SENTINEL/);
 		const capabilities = listed.details?.agentCapabilities;
@@ -156,8 +155,8 @@ describe("agent management config parsing", () => {
 		assert.ok(capabilities);
 		const reviewer = capabilities.agents.find((agent) => agent.name === "reviewer");
 		assert.ok(reviewer, "reviewer builtin should be present in capability output");
-		assert.deepEqual(reviewer.tools.names, ["read", "grep", "find", "ls", "contact_supervisor"]);
-		assert.match(readText(listed), /Tools: read, grep, find, ls, contact_supervisor/);
+		assert.deepEqual(reviewer.tools.names, ["read", "grep", "find", "ls"]);
+		assert.match(readText(listed), /Tools: read, grep, find, ls/);
 		assert.equal("acceptance" in reviewer, false);
 	});
 
@@ -296,13 +295,12 @@ Missing.
 		}
 	});
 
-	it("does not preflight Herdr machines while listing capabilities", () => {
+	it("lists external-cli availability from PATH without preflighting at discovery", () => {
 		const agentsDir = path.join(tempDir, ".pi", "agents");
 		fs.mkdirSync(agentsDir, { recursive: true });
-		fs.writeFileSync(path.join(agentsDir, "remote-external.md"), `---
-name: remote-external
-description: Remote external CLI
-machine: workmac
+		fs.writeFileSync(path.join(agentsDir, "local-external.md"), `---
+name: local-external
+description: Local external CLI
 runner:
   type: external-cli
   command: codex
@@ -311,26 +309,22 @@ Remote.
 `);
 		const binDir = path.join(tempDir, "bin");
 		fs.mkdirSync(binDir);
-		writeNodeCommand(binDir, "ssh", "process.exit(0)");
+		writeNodeCommand(binDir, "codex", "process.exit(0)");
 		const previousPath = process.env.PATH;
-		const previousHerdrBin = process.env.HERDR_BIN;
 		try {
 			process.env.PATH = binDir;
-			process.env.HERDR_BIN = path.join(binDir, "missing-herdr");
 			const listed = handleManagementAction("list", { agentScope: "project", capabilities: true }, {
 				cwd: tempDir,
 				modelRegistry: { getAvailable: () => [] },
 			});
 			assert.equal(listed.isError, false);
-			assert.match(readText(listed), /external-cli:codex @ workmac saved Herdr placement; transport ✓; machine not preflighted/);
-			const runner = listed.details?.agentCapabilities?.agents.find((agent) => agent.name === "remote-external")?.runner;
+			assert.match(readText(listed), /external-cli:codex ✓/);
+			const runner = listed.details?.agentCapabilities?.agents.find((agent) => agent.name === "local-external")?.runner;
 			assert.equal(runner?.type, "external-cli");
 			if (runner?.type === "external-cli") assert.equal(runner.available, true);
 		} finally {
 			if (previousPath === undefined) delete process.env.PATH;
 			else process.env.PATH = previousPath;
-			if (previousHerdrBin === undefined) delete process.env.HERDR_BIN;
-			else process.env.HERDR_BIN = previousHerdrBin;
 		}
 	});
 

@@ -136,7 +136,7 @@ describe("main watchdog runtime", () => {
 			assert.equal(requests.length, 2, "warning continuations and side prompts alone cannot create fresh activity");
 			runtime.reset("compact", { clearScope: true });
 			runtime.handleBeforeAgentStart({ prompt: "New scope" }, ctx);
-			runtime.handleTurnEnd(activityTurn("subagent_supervisor", { action: "pending" }, "No pending requests"), ctx);
+			runtime.handleTurnEnd(activityTurn("bg_wait", { id: "ci-gate" }, "No pending requests"), ctx);
 			await runtime.handleAgentEnd({}, ctx);
 			assert.doesNotMatch(requests.at(-1)!.delta, /CI gate completed successfully/);
 		} finally { runtime.dispose(); }

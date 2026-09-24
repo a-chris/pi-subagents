@@ -231,13 +231,13 @@ function summarizeForegroundChildren(run: ForegroundResumeRun, indices: Set<numb
 }
 
 function foregroundChildrenNeedingAttention(run: ForegroundResumeRun, indices: Set<number>) {
-	return run.children.filter((child) => indices.has(child.index) && child.status === "detached" && child.activityState === "needs_attention" && child.currentTool === "contact_supervisor");
+	return run.children.filter((child) => indices.has(child.index) && child.status === "detached" && child.activityState === "needs_attention");
 }
 
 function formatForegroundAttention(run: ForegroundResumeRun, children: ReturnType<typeof foregroundChildrenNeedingAttention>, elapsedMs: number): AgentToolResult<Details> {
 	const childList = children.map((child) => `${child.agent}${child.index !== undefined ? `#${child.index}` : ""}`).join(", ");
 	return result(
-		`Waited ${formatDuration(elapsedMs)} for remembered detached foreground run "${run.runId}"; attention required. ${children.length} child run(s) need attention: ${childList}. Reply to any pending supervisor request, then call bg_wait({ id: "${run.runId}" }) again or inspect status; do not resume or launch a replacement while it remains detached.`,
+		`Waited ${formatDuration(elapsedMs)} for remembered detached foreground run "${run.runId}"; attention required. ${children.length} child run(s) need attention: ${childList}. Inspect status and resolve the cause, then call bg_wait({ id: "${run.runId}" }) again; do not resume or launch a replacement while it remains detached.`,
 	);
 }
 

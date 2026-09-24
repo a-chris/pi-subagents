@@ -170,7 +170,6 @@ export function formatWatchdogOrchestrationActivity(event: unknown): string {
 		const args = call.arguments;
 		if (!args || typeof args !== "object") continue;
 		const eligible = call.name === "bg_wait"
-			|| (call.name === "subagent_supervisor" && ["pending", "list", "reply"].includes(args.action))
 			|| (call.name === "subagent" && (["status", "resume", "interrupt", "steer", "stop"].includes(args.action)
 				|| (args.action === undefined && (typeof args.agent === "string" || typeof args.workflowScript === "string" || typeof args.workflowScriptPath === "string"))));
 		if (!eligible) continue;

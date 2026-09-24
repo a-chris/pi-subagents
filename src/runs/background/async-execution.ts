@@ -15,7 +15,6 @@ import { childCacheRetentionEnv } from "../../shared/child-cache-retention.ts";
 import { buildEffectiveSystemPrompt } from "../shared/effective-system-prompt.ts";
 import { currentCompletionOwnerId } from "../../shared/completion-owner.ts";
 import { planChildLaunch, projectChainOutputSchemas, resolveStepBehavior, suppressProgressForReadOnlyTask, type ResolvedStepBehavior } from "../shared/child-launch-plan.ts";
-import { formatHerdrMachineRunnerUnsupported, resolveHerdrMachinePlacement } from "../shared/herdr-machine.ts";
 import { applyThinkingSuffix, getHostBuiltinToolNames, projectLaunchResolvedChildExtensions, resolvePiLaunchToolPlan } from "../shared/child-tool-plan.ts";
 import { injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { applyWatchdogLaunchRules, sendRuleViolationWarning } from "../../watchdog/rules.ts";
@@ -48,7 +47,6 @@ import {
 	type AsyncStatus,
 	type ArtifactConfig,
 	type Details,
-	type HerdrMachineReference,
 	type JsonSchemaObject,
 	type MaxOutputConfig,
 	type NestedRouteInfo,
@@ -198,9 +196,6 @@ interface AsyncChainParams {
 	availableModels?: AvailableModelInfo[];
 	cwd?: string;
 	maxOutput?: MaxOutputConfig;
-	machine?: string;
-	/** Launch cwd as typed when a machine is set: a path on that machine, never resolved locally. */
-	machineCwd?: string;
 	artifactsDir?: string;
 	artifactConfig: ArtifactConfig;
 	shareEnabled: boolean;
@@ -258,9 +253,6 @@ interface AsyncSingleParams {
 	ctx: AsyncExecutionContext;
 	cwd?: string;
 	requestedCwd?: string;
-	machine?: string;
-	/** Launch cwd as typed when a machine is set: a path on that machine, never resolved locally. */
-	machineCwd?: string;
 	maxOutput?: MaxOutputConfig;
 	artifactsDir?: string;
 	artifactConfig: ArtifactConfig;
@@ -914,7 +906,6 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 	const chainSkills = params.chainSkills ?? [];
 	const availableModels = params.availableModels;
 	const runnerCwd = resolveChildCwd(ctx.cwd, cwd);
-	const launchMachine = params.machine;
 	let managedWorktreeProvider: "native" | "worktrunk" | undefined;
 	try {
 		if (chain.some((step) => "worktree" in step && step.worktree === true)) {
@@ -981,22 +972,8 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 	const buildSeqStep = (s: SequentialStep, sessionFile?: string, behaviorCwd?: string, progressPrecreated = false, resolvedBehavior?: ResolvedStepBehavior, flatIndex?: number, parallelOutputNamespace?: { stepIndex: number; taskIndex?: number }, runFanoutPath?: string) => {
 		const a = agents.find((x) => x.name === s.agent)!;
 		const effectiveBehavior = resolvedBehavior ?? suppressProgressForReadOnlyTask(resolveStepBehavior(a, buildStepOverrides(s), chainSkills), s.task, originalTask);
-		const requestedMachine = s.machine ?? launchMachine ?? a.machine;
 		const externalRunner = a.runner?.type === "external-cli" || a.runner?.type === "external-job";
 		const externalRunnerType = a.runner?.type;
-		const machineUnsupported = formatHerdrMachineRunnerUnsupported({ machine: requestedMachine, agentName: a.name, runnerType: a.runner?.type, worktree: s.worktree });
-		if (machineUnsupported) throw new AsyncStartValidationError(machineUnsupported);
-		let machine: HerdrMachineReference | undefined;
-		let machineEnv: Record<string, string> | undefined;
-		if (requestedMachine) {
-			try {
-				const placement = resolveHerdrMachinePlacement({ machine: requestedMachine, cwd: runnerCwd, stepCwd: s.cwd ?? params.machineCwd });
-				machine = placement.machine;
-				machineEnv = placement.env;
-			} catch (error) {
-				throw new AsyncStartValidationError(error instanceof Error ? error.message : String(error));
-			}
-		}
 		if (externalRunner) {
 			const unsupported: string[] = [];
 			if (s.model !== undefined) unsupported.push("model override");
@@ -1031,7 +1008,6 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			runtimeCwd: ctx.cwd,
 			stepCwdInput: s.cwd,
 			behaviorCwd,
-			...(machine ? { machineCwd: machine.cwd } : {}),
 			chainSkills,
 			outputBaseDir,
 			parallelOutputNamespace,
@@ -1107,7 +1083,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 				throw new AsyncStartValidationError(error instanceof Error ? error.message : String(error));
 			}
 		}
-		const launchRuleError = applyWatchdogLaunchRules({ cwd: machine ? runnerCwd : stepCwd, agent: a.name, model: selectedModel, warn: (violation) => sendRuleViolationWarning(ctx.pi, violation) });
+		const launchRuleError = applyWatchdogLaunchRules({ cwd: stepCwd, agent: a.name, model: selectedModel, warn: (violation) => sendRuleViolationWarning(ctx.pi, violation) });
 		if (launchRuleError) throw new AsyncStartValidationError(launchRuleError);
 		const fast = s.fast ?? params.fast ?? a.fast;
 		const hostAvailableBuiltins = getHostBuiltinToolNames(ctx.pi);
@@ -1158,8 +1134,6 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			agent: s.agent,
 			task,
 			...(a.runner ? { runner: a.runner } : {}),
-			...(machine ? { machine } : {}),
-			...(machineEnv ? { machineEnv } : {}),
 			...(params.contextForAgent ? { context: params.contextForAgent(s.agent) } : {}),
 			...(agentContract ? { agentContract } : {}),
 			phase: s.phase,
@@ -1167,7 +1141,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 			outputName: s.as,
 			structured: Boolean(behavior.outputSchema),
 			cwd: stepCwd,
-			requestedCwd: machine ? machine.cwd : s.cwd ?? stepCwd,
+			requestedCwd: s.cwd ?? stepCwd,
 			model: selectedModel,
 			...(contextLimit !== undefined ? { contextLimit } : {}),
 			...(fast !== undefined ? { fast } : {}),
@@ -1260,7 +1234,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 							}
 						}
 						const staticStep = nextFlatStep();
-						return buildSeqStep({ ...t, machine: t.machine ?? s.machine, worktree: s.worktree, agentContract: t.agentContract ?? s.agentContract, gateOn: t.gateOn ?? s.gateOn }, staticStep.sessionFile, behaviorCwd, progressPrecreated, parallelBehaviors[taskIndex], staticStep.index, { stepIndex, taskIndex }, resultMode === "parallel" ? `tasks[${taskIndex}]` : `chain[${stepIndex}].parallel[${taskIndex}]`);
+						return buildSeqStep({ ...t, worktree: s.worktree, agentContract: t.agentContract ?? s.agentContract, gateOn: t.gateOn ?? s.gateOn }, staticStep.sessionFile, behaviorCwd, progressPrecreated, parallelBehaviors[taskIndex], staticStep.index, { stepIndex, taskIndex }, resultMode === "parallel" ? `tasks[${taskIndex}]` : `chain[${stepIndex}].parallel[${taskIndex}]`);
 					}),
 					concurrency: s.concurrency,
 					failFast: s.failFast,
@@ -1423,8 +1397,6 @@ export function executeAsyncChain(
 		availableModels: params.availableModels,
 		cwd,
 		chainSkills: params.chainSkills,
-		machine: params.machine,
-		machineCwd: params.machineCwd,
 		sessionFilesByFlatIndex,
 		thinkingOverridesByFlatIndex,
 		contextForAgent: params.contextForAgent,
@@ -1741,20 +1713,6 @@ export function executeAsyncSingle(
 		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
 	}
 	const runnerCwd = resolveChildCwd(ctx.cwd, cwd);
-	const requestedMachine = params.machine ?? agentConfig.machine;
-	const machineUnsupported = formatHerdrMachineRunnerUnsupported({ machine: requestedMachine, agentName: agentConfig.name, runnerType: agentConfig.runner?.type, worktree: params.worktree });
-	if (machineUnsupported) return formatAsyncStartError("single", machineUnsupported);
-	let machine: HerdrMachineReference | undefined;
-	let machineEnv: Record<string, string> | undefined;
-	if (requestedMachine) {
-		try {
-			const placement = resolveHerdrMachinePlacement({ machine: requestedMachine, cwd: runnerCwd, stepCwd: params.machineCwd });
-			machine = placement.machine;
-			machineEnv = placement.env;
-		} catch (error) {
-			return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
-		}
-	}
 	let managedWorktreeProvider: "native" | "worktrunk" | undefined;
 	if (params.worktree === true) {
 		try {
@@ -1768,7 +1726,7 @@ export function executeAsyncSingle(
 		? WORKTREE_AGENT_CWD_PLACEHOLDER
 		: params.worktree === true && managedWorktreeProvider === "native"
 		? resolveExpectedWorktreeAgentCwd(runnerCwd, `${id}-s0`, 0, worktreeBaseDir)
-		: machine?.cwd ?? runnerCwd;
+		: runnerCwd;
 	const readExistenceCwd = params.worktree === true ? runnerCwd : instructionCwd;
 	const skillNames = params.skills ?? agentConfig.skills ?? [];
 	const availableModels = params.availableModels;
@@ -1811,11 +1769,7 @@ export function executeAsyncSingle(
 	// absolute paths pass through; relative paths resolve against the child cwd.
 	const reads = params.reads !== undefined ? params.reads : agentConfig.defaultReads ?? false;
 	const readPaths = Array.isArray(reads)
-		? machine
-			? externalRunner
-				? reads.map((read) => read === "~" || read.startsWith("~/") || path.posix.isAbsolute(read) ? read : path.posix.resolve(instructionCwd, read))
-				: []
-			: managedWorktreeProvider === "worktrunk"
+		? managedWorktreeProvider === "worktrunk"
 			? resolveExistingReadInstructionPaths(reads, instructionCwd, readExistenceCwd)
 			: resolveExistingReadPaths(reads, readExistenceCwd)
 		: [];
@@ -2037,13 +1991,10 @@ export function executeAsyncSingle(
 						agent,
 						task: taskText,
 						...(agentConfig.runner ? { runner: agentConfig.runner } : {}),
-						...(machine ? { machine } : {}),
-						...(!externalRunner && machine && params.reads !== undefined ? { remoteReads: params.reads } : {}),
-						...(machineEnv ? { machineEnv } : {}),
 						...(params.externalJobFollowUp ? { externalJobFollowUp: params.externalJobFollowUp } : {}),
 						...(params.context ? { context: params.context } : {}),
-						cwd: machine?.cwd ?? runnerCwd,
-						requestedCwd: machine?.cwd ?? params.requestedCwd ?? runnerCwd,
+						cwd: runnerCwd,
+						requestedCwd: params.requestedCwd ?? runnerCwd,
 						model: selectedModel,
 						...(contextLimit !== undefined ? { contextLimit } : {}),
 						...(params.fast ?? agentConfig.fast ? { fast: params.fast ?? agentConfig.fast } : {}),

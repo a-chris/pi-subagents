@@ -152,7 +152,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		);
 		assert.equal(missing.isError, true);
 		assert.match(missing.content[0]?.text ?? "", new RegExp(`cwd does not exist: ${effectiveCwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-		assert.match(missing.content[0]?.text ?? "", /resolved from "missing-local-cwd"/);
+		assert.match(missing.content[0]?.text ?? "", /cwd does not exist: .*missing-local-cwd/);
 
 		const fileCwd = path.join(tempDir, "not-a-directory");
 		fs.writeFileSync(fileCwd, "file");
@@ -184,7 +184,6 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 
 		assert.equal(result.isError, true);
 		assert.match(result.content[0]?.text ?? "", new RegExp(`cwd does not exist: ${effectiveCwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-		assert.match(result.content[0]?.text ?? "", /resolved from "missing-async-cwd"/);
 		assert.equal(mockPi.callCount(), 0);
 	});
 
@@ -368,7 +367,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 			"Use a scenario that discusses selection for an implementation task or closeout of an implementation assignment.",
 		].join("\\n");
 		const result = await makeExecutor([makeAgent("delegate", {
-			tools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+			tools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 			inheritProjectContext: true,
 			systemPromptMode: "append",
 		})]).execute(
@@ -2632,7 +2631,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 			{
 				async: false,
 				workflowScript: `return await runs.run("impl", { agent: "worker", task: "Implement the requested source fix" });`,
-				capabilityCeiling: { version: 1, allowedTools: ["read", "grep", "find", "ls", "contact_supervisor"], denyExtensions: true, sources: ["test"] },
+				capabilityCeiling: { version: 1, allowedTools: ["read", "grep", "find", "ls"], denyExtensions: true, sources: ["test"] },
 			},
 			new AbortController().signal,
 			undefined,

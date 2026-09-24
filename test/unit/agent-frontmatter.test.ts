@@ -674,8 +674,8 @@ Do work
 			assert.equal(agents.find((candidate) => candidate.name === name)?.tools?.includes("intercom"), false, `${name} should not require generic intercom`);
 		}
 		assert.match(oracle?.systemPrompt ?? "", /asking or consulting the oracle/);
-		assert.match(oracle?.systemPrompt ?? "", /When runtime bridge instructions provide `contact_supervisor`/);
-		assert.match(oracle?.systemPrompt ?? "", /If no supervisor channel is available/);
+		assert.match(oracle?.systemPrompt ?? "", /name the decision that still needs the main agent/);
+		assert.match(oracle?.systemPrompt ?? "", /There is no mid-run coordination channel back to the main agent/);
 		assert.equal(agents.some((candidate) => candidate.name === "planner"), false);
 		assert.equal(agents.some((candidate) => candidate.name === "context-builder"), false);
 		assert.equal(agents.some((candidate) => candidate.name === "gpt-pro"), false);
@@ -1902,10 +1902,10 @@ Do work
 			process.env.USERPROFILE = homeDir;
 			const agents = discoverAgentsAll(dir).builtin;
 			const expectedTools = {
-				worker: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
-				delegate: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
-				reviewer: ["read", "grep", "find", "ls", "contact_supervisor"],
-				scout: ["read", "grep", "find", "ls", "bash", "write", "contact_supervisor"],
+				worker: ["read", "grep", "find", "ls", "bash", "edit", "write"],
+				delegate: ["read", "grep", "find", "ls", "bash", "edit", "write"],
+				reviewer: ["read", "grep", "find", "ls"],
+				scout: ["read", "grep", "find", "ls", "bash", "write"],
 				researcher: ["read", "write", "web_search", "fetch_content", "get_search_content", "source_check"],
 				"evidence-auditor": ["read", "web_search", "fetch_content", "get_search_content", "source_check"],
 			};

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createChildHooks } from "../../src/runs/shared/child-hooks.ts";
 import { buildInProcessChildLaunch } from "../../src/runs/shared/child-launch.ts";
-import { childSupervisorMetadata, evaluateChildToolDiagnostic, type ChildRuntimeConfig } from "../../src/runs/shared/child-runtime-config.ts";
+import { evaluateChildToolDiagnostic, type ChildRuntimeConfig } from "../../src/runs/shared/child-runtime-config.ts";
 
 function baseConfig(overrides: Partial<ChildRuntimeConfig> = {}): ChildRuntimeConfig {
 	return { fanoutChild: false, depth: 1, waitTool: { enabled: true }, fast: false, ...overrides };
@@ -71,22 +71,6 @@ describe("child runtime config", () => {
 		assert.deepEqual(
 			evaluateChildToolDiagnostic(baseConfig({ agent: "worker", requiredTools: ["read", "mcp_search"], mcpDirectTools: ["mcp_search"] }), ["read"]),
 			{ agent: "worker", required: ["read", "mcp_search"], available: ["read"], missing: ["mcp_search"], missingMcpDirectTools: ["mcp_search"] },
-		);
-	});
-
-	it("derives supervisor metadata only when the channel, run, agent, index, and orchestrator session are all set", () => {
-		assert.equal(childSupervisorMetadata(baseConfig({ supervisorChannelDir: "/tmp/channel", runId: "run-1", agent: "worker" })), undefined);
-		assert.deepEqual(
-			childSupervisorMetadata(baseConfig({
-				supervisorChannelDir: "/tmp/channel",
-				runId: "run-1",
-				agent: "worker",
-				childIndex: 2,
-				orchestratorSessionId: "session-1",
-				orchestratorTarget: "orchestrator",
-				intercomSessionName: "child-target",
-			})),
-			{ channelDir: "/tmp/channel", runId: "run-1", agent: "worker", childIndex: 2, orchestratorTarget: "orchestrator", orchestratorSessionId: "session-1", childTarget: "child-target" },
 		);
 	});
 });

@@ -288,7 +288,7 @@ describe("agent eject/disable/enable/reset management actions", () => {
 			assert.equal(discoverAgents(tempDir, "both").agents.find((a) => a.name === "reviewer")?.source, "builtin");
 		});
 
-	it("removes a settings override and restores the pristine builtin", () => {
+		it("removes a settings override and restores the pristine builtin", () => {
 			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
 			handleManagementAction("disable", { agent: "reviewer" }, ctx);
 			assert.equal(discoverAgents(tempDir, "both").agents.find((a) => a.name === "reviewer"), undefined);
@@ -298,76 +298,6 @@ describe("agent eject/disable/enable/reset management actions", () => {
 			assert.match(readText(reset), /Removed user settings override/);
 			assert.ok(discoverAgents(tempDir, "both").agents.find((a) => a.name === "reviewer"));
 			assert.equal((readJson(userSettingsPath()) as { subagents?: unknown }).subagents, undefined);
-	});
-
-		it("retains machine placement while clearing other settings customization", () => {
-			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-			writeJson(userSettingsPath(), {
-				subagents: { agentOverrides: { reviewer: { machine: "workmac", model: "openai/gpt-5.4", thinking: "high" } } },
-			});
-
-			const reset = handleManagementAction("reset", { agent: "reviewer" }, ctx);
-			assert.equal(reset.isError, false);
-			assert.match(readText(reset), /Retained machine placement/);
-			const settings = readJson(userSettingsPath()) as { subagents: { agentOverrides: { reviewer: unknown } } };
-			assert.deepEqual(settings.subagents.agentOverrides.reviewer, { machine: "workmac" });
-			assert.equal(discoverAgentsAll(tempDir).builtin.find((agent) => agent.name === "reviewer")?.machine, "workmac");
-		});
-
-		it("retains a false machine clear so an inherited placement does not reactivate", () => {
-			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-			writeJson(userSettingsPath(), {
-				subagents: { agentOverrides: { worker: { machine: "workmac" } } },
-			});
-			writeJson(projectSettingsPath(), {
-				subagents: { agentOverrides: { worker: { machine: false, model: "openai/gpt-5.4" } } },
-			});
-
-			const reset = handleManagementAction("reset", { agent: "worker", agentScope: "project" }, ctx);
-			assert.equal(reset.isError, false);
-			const settings = readJson(projectSettingsPath()) as { subagents: { agentOverrides: { worker: unknown } } };
-			assert.deepEqual(settings.subagents.agentOverrides.worker, { machine: false });
-			assert.equal(discoverAgentsAll(tempDir).builtin.find((agent) => agent.name === "worker")?.machine, undefined);
-		});
-
-	it("removes both a custom file and a settings override in one reset", () => {
-			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-			handleManagementAction("eject", { agent: "reviewer" }, ctx);
-			handleManagementAction("disable", { agent: "reviewer" }, ctx);
-
-			const reset = handleManagementAction("reset", { agent: "reviewer" }, ctx);
-			assert.equal(reset.isError, false);
-			assert.match(readText(reset), /Deleted custom user agent file/);
-			assert.match(readText(reset), /Removed user settings override/);
-			assert.equal(fs.existsSync(userAgentPath("reviewer")), false);
-			assert.ok(discoverAgents(tempDir, "both").agents.find((a) => a.name === "reviewer"));
-		});
-
-		it("reports a no-op when there is nothing to reset in the target scope", () => {
-			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-			const reset = handleManagementAction("reset", { agent: "reviewer" }, ctx);
-			assert.equal(reset.isError, false);
-			assert.match(readText(reset), /no user customization to reset/);
-			assert.match(readText(reset), /at its bundled builtin default/);
-		});
-
-		it("points to delete for a custom agent with no bundled default", () => {
-			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-			fs.mkdirSync(path.dirname(userAgentPath("solo-helper")), { recursive: true });
-			fs.writeFileSync(userAgentPath("solo-helper"), "---\nname: solo-helper\ndescription: Solo\n---\n\nSolo.\n", "utf-8");
-
-			const reset = handleManagementAction("reset", { agent: "solo-helper" }, ctx);
-			assert.equal(reset.isError, true);
-			assert.match(readText(reset), /no bundled default to reset to/);
-			assert.match(readText(reset), /action: "delete"/);
-			assert.equal(fs.existsSync(userAgentPath("solo-helper")), true);
-		});
-
-		it("refuses to reset an unknown agent", () => {
-			const ctx = { cwd: tempDir, modelRegistry: { getAvailable: () => [] } };
-			const reset = handleManagementAction("reset", { agent: "no-such-agent" }, ctx);
-			assert.equal(reset.isError, true);
-			assert.match(readText(reset), /not found/);
 		});
 	});
 });

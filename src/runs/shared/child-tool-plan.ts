@@ -103,27 +103,6 @@ export function deriveForkPromptCacheKey(parentSessionId: string | undefined): s
 	return `pi-fork:${digest}`;
 }
 
-function sanitizeSupervisorChannelSegment(value: string): string {
-	return (
-		value
-			.trim()
-			.replace(/[^A-Za-z0-9._-]+/g, "-")
-			.replace(/^-+|-+$/g, "") || "unknown"
-	);
-}
-
-export function supervisorChannelDir(
-	runId: string,
-	agent: string,
-	childIndex: number,
-): string {
-	return path.join(
-		TEMP_ROOT_DIR,
-		"supervisor-channels",
-		`${sanitizeSupervisorChannelSegment(runId)}-${sanitizeSupervisorChannelSegment(agent)}-${childIndex}`,
-	);
-}
-
 export function applyThinkingSuffix(
 	model: string | undefined,
 	thinking: string | false | undefined,
@@ -427,9 +406,6 @@ export function resolvePiLaunchToolPlan(
 		!excludedToolSet.has("subagent") &&
 		(!allowedToolSet || allowedToolSet.has("subagent"))
 	);
-	if (effectiveDeclaredBuiltinTools.includes("subagent_supervisor") && !fanoutAuthorized) {
-		throw new Error("Tool 'subagent_supervisor' requires fanout authorization: include 'subagent' in the effective tools allowlist or enable allowNestedSubagents.");
-	}
 	const toolExtensionPaths: string[] = capabilityCeiling?.denyExtensions
 		? []
 		: (input.tools ?? []).filter(
@@ -470,20 +446,13 @@ export function resolvePiLaunchToolPlan(
 			...internalTools,
 		]),
 	];
-	// Upward contact stays in the --tools allowlist but is not a strict
-	// requirement: children register contact_supervisor at runtime through
-	// context. The pre-0.50 bridge always
-	// appended intercom alongside contact_supervisor, so that exact pairing is
-	// legacy plumbing, not a user demand for an external intercom provider;
-	// a lone intercom entry stays strictly required (#1207).
-	const legacySupervisorPairing = effectiveDeclaredBuiltinTools.includes("contact_supervisor");
 	const requiredChildTools = explicitToolAllowlist
 		? [
 				...new Set([
 					...(input.tools !== undefined ? effectiveDeclaredBuiltinTools : []),
 					...(input.mcpDirectTools?.length ? effectiveMcpTools : []),
 					...internalTools,
-				].filter((tool) => tool !== "contact_supervisor" && (!legacySupervisorPairing || tool !== "intercom"))),
+				]),
 			]
 		: [];
 	const permSystemExt = capabilityCeiling?.denyExtensions

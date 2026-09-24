@@ -43,16 +43,6 @@ export interface ChildStructuredOutput {
 	capture: (value: unknown, acceptanceReport: unknown | undefined) => void;
 }
 
-export interface ChildSupervisorMetadata {
-	channelDir: string;
-	runId: string;
-	agent: string;
-	childIndex: number;
-	orchestratorTarget?: string;
-	orchestratorSessionId: string;
-	childTarget?: string;
-}
-
 /**
  * Everything the child-side hooks need to know about the launch. The process
  * that hosts the child session builds it and passes it to the hooks directly.
@@ -63,11 +53,8 @@ export interface ChildRuntimeConfig {
 	childIndex?: number;
 	fanoutChild: boolean;
 	sessionName?: string;
-	intercomSessionName?: string;
-	orchestratorTarget?: string;
 	orchestratorSessionId?: string;
 	parentSessionId?: string;
-	supervisorChannelDir?: string;
 	/** Route the child reports nested runs on; set only for fanout-authorized children. */
 	nestedRoute?: ChildNestedRoute;
 	nestedParent?: ChildNestedParent;
@@ -91,8 +78,6 @@ export interface ChildRuntimeConfig {
 	waitTool: ResolvedWaitToolConfig;
 	runtimeState?: SubagentState;
 	holdFinalDrain?: (held: boolean) => void;
-	/** Installation-local downward owner-channel barrier; never inherited or serialized into descendants. */
-	hasPendingSupervisorRequest?: () => boolean;
 	structuredOutput?: ChildStructuredOutput;
 	requiredTools?: string[];
 	mcpDirectTools?: string[];
@@ -101,19 +86,6 @@ export interface ChildRuntimeConfig {
 	/** Receives the runtime-acknowledged extension ids when the child run ends. */
 	runtimeAcknowledgements?: (ids: string[]) => void;
 	fast: boolean;
-}
-
-export function childSupervisorMetadata(config: ChildRuntimeConfig): ChildSupervisorMetadata | undefined {
-	if (!config.supervisorChannelDir || !config.runId || !config.agent || !config.orchestratorSessionId || config.childIndex === undefined) return undefined;
-	return {
-		channelDir: config.supervisorChannelDir,
-		runId: config.runId,
-		agent: config.agent,
-		childIndex: config.childIndex,
-		...(config.orchestratorTarget ? { orchestratorTarget: config.orchestratorTarget } : {}),
-		orchestratorSessionId: config.orchestratorSessionId,
-		...(config.intercomSessionName ? { childTarget: config.intercomSessionName } : {}),
-	};
 }
 
 /** Compute the child tool-availability diagnostic; undefined when every required tool is present. */

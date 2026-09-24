@@ -72,13 +72,6 @@ describe("child tool plan host builtin intersection", () => {
 		}
 	});
 
-	it("retains the supervisor pairing exception but requires a lone intercom", () => {
-		for (const tools of [["intercom"], ["intercom", "contact_supervisor"]]) {
-			const plan = resolvePiLaunchToolPlan({ tools, hostAvailableBuiltins: ["read"] });
-			assert.deepEqual(plan.effectiveToolAllowlist, tools);
-			assert.deepEqual(plan.requiredChildTools, tools.length === 1 ? tools : []);
-		}
-	});
 
 	it("intersects declared tools with host-available builtins", () => {
 		const plan = resolvePiLaunchToolPlan({
@@ -90,36 +83,18 @@ describe("child tool plan host builtin intersection", () => {
 		assert.deepEqual(plan.effectiveToolAllowlist, ["bash"]);
 	});
 
-	it("keeps requested native coordination tools through host builtin filtering, but not ceilings or exclusions", () => {
-		const tools = ["read", "subagent", "contact_supervisor", "subagent_supervisor"];
+	it("keeps requested native coordination tools through host builtin filtering", () => {
+		const tools = ["read", "subagent", "bg_wait"];
 		const input = { tools, hostAvailableBuiltins: ["read"] };
 		const plan = resolvePiLaunchToolPlan(input);
 		assert.deepEqual(plan.effectiveToolAllowlist, tools);
-		assert.deepEqual(plan.requiredChildTools, ["read", "subagent", "subagent_supervisor"]);
+		assert.deepEqual(plan.requiredChildTools, ["read", "subagent", "bg_wait"]);
 		assert.equal(plan.fanoutAuthorized, true);
 		assert.deepEqual(plan.unavailableHostBuiltins, []);
-		for (const restriction of [
-			{ excludeTools: ["subagent_supervisor"] },
-			{ capabilityCeiling: { version: 1 as const, allowedTools: ["read", "subagent", "contact_supervisor"], denyExtensions: true, sources: ["test"] } },
-		]) {
-			const restricted = resolvePiLaunchToolPlan({ ...input, ...restriction });
-			assert.equal(restricted.fanoutAuthorized, true);
-			assert.equal(restricted.effectiveToolAllowlist.includes("subagent_supervisor"), false);
-		}
-		const leaf = resolvePiLaunchToolPlan({ ...input, tools: ["read", "contact_supervisor"] });
+		const leaf = resolvePiLaunchToolPlan({ ...input, tools: ["read"] });
 		assert.equal(leaf.fanoutAuthorized, false);
-		assert.equal(leaf.effectiveToolAllowlist.includes("subagent_supervisor"), false);
 	});
 
-	it("rejects an explicitly requested reply tool when fanout authorization is absent or removed", () => {
-		for (const input of [
-			{ tools: ["read", "subagent_supervisor"] },
-			{ tools: ["read", "subagent", "subagent_supervisor"], excludeTools: ["subagent"] },
-			{ tools: ["read", "subagent", "subagent_supervisor"], capabilityCeiling: { version: 1 as const, allowedTools: ["read", "subagent_supervisor"], sources: ["test"] } },
-		]) {
-			assert.throws(() => resolvePiLaunchToolPlan({ ...input, hostAvailableBuiltins: ["read"] }), /subagent_supervisor.*requires fanout authorization/);
-		}
-	});
 
 	it("keeps all tools when host provides them", () => {
 		const plan = resolvePiLaunchToolPlan({

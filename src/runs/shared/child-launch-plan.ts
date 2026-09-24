@@ -37,7 +37,6 @@ export interface ChildLaunchPlanInput {
 	runtimeCwd: string;
 	stepCwdInput?: string;
 	behaviorCwd?: string;
-	machineCwd?: string;
 	chainSkills?: string[];
 	outputBaseDir?: string;
 	parallelOutputNamespace?: { stepIndex: number; taskIndex?: number };
@@ -129,7 +128,7 @@ export function suppressProgressForReadOnlyTask(behavior: ResolvedStepBehavior, 
 }
 
 export function planChildLaunch(input: ChildLaunchPlanInput): ChildLaunchPlan {
-	const stepCwd = input.machineCwd ?? resolveChildCwd(input.runnerCwd, input.stepCwdInput);
+	const stepCwd = resolveChildCwd(input.runnerCwd, input.stepCwdInput);
 	const instructionCwd = input.behaviorCwd ?? stepCwd;
 	const readExistenceCwd = input.behaviorCwd ? stepCwd : instructionCwd;
 	let behavior = suppressProgressForReadOnlyTask(

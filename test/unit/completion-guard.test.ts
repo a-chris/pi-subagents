@@ -283,7 +283,7 @@ test("read-only issue drafting tasks do not trigger on suggested fix wording", (
 		agent: "delegate",
 		task,
 		messages: [assistantText("Title: completionGuard false positive\n\nSuggested fix: model read-only intent.")],
-		tools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 	});
 
 	assert.deepEqual(result, {
@@ -353,7 +353,7 @@ test("implementation tool contract rejects read-only worker launches", () => {
 		validateImplementationToolContract({
 			agent: "worker",
 			task: "Implement the requested source fix",
-			tools: ["read", "grep", "find", "ls", "contact_supervisor"],
+			tools: ["read", "grep", "find", "ls"],
 		}) ?? "",
 		/no mutation-capable tools/,
 	);
@@ -387,8 +387,8 @@ test("implementation tool contract rejects read-only worker launches", () => {
 });
 
 test("read-only audit tasks survive host-clamped declared mutation tools", () => {
-	const tools = ["read", "grep", "find", "ls", "contact_supervisor"];
-	const requestedTools = ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"];
+	const tools = ["read", "grep", "find", "ls"];
+	const requestedTools = ["read", "grep", "find", "ls", "bash", "edit", "write"];
 	assert.equal(validateImplementationToolContract({
 		agent: "delegate",
 		task: "Read-only bug investigation. No source edits, commits, pushes, merges, installs, or state repair. Return concrete findings and a minimal fix proposal.",
@@ -448,7 +448,7 @@ test("oracle review tasks with bash available do not require mutation", () => {
 		agent: "oracle",
 		task,
 		messages: [assistantText("Review complete with file-backed findings.")],
-		tools: ["read", "grep", "find", "ls", "bash", "intercom"],
+		tools: ["read", "grep", "find", "ls", "bash"],
 	});
 
 	assert.deepEqual(result, {
@@ -494,7 +494,7 @@ test("escaped line separators do not hide read-only prohibitions", () => {
 		agent: "delegate",
 		task,
 		messages: [assistantText("The exact user-facing response")],
-		tools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 	}), {
 		expectedMutation: false,
 		attemptedMutation: false,
@@ -742,7 +742,7 @@ test("implementation task with Cursor edit thinking does not trigger", () => {
 			assistantThinking("Cursor edit: docs/BACKEND_ARCHITECTURE.md added 1 line\n"),
 			assistantText("Implemented the six simplifications."),
 		],
-		tools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 	});
 	assert.deepEqual(result, {
 		expectedMutation: true,
@@ -761,8 +761,8 @@ test("writer-role tasks with unknown implementation wording reject read-only lau
 		assert.match(validateImplementationToolContract({
 			agent: "worker",
 			task,
-			tools: ["read", "grep", "find", "ls", "contact_supervisor"],
-			requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+			tools: ["read", "grep", "find", "ls"],
+			requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 		}) ?? "", /no mutation-capable tools/, task);
 	}
 });
@@ -772,16 +772,16 @@ test("explicit writer acceptance role overrides reviewer agent heuristics", () =
 		agent: "reviewer",
 		task: "Handle the authentication flow",
 		acceptanceRole: "writer",
-		tools: ["read", "grep", "find", "ls", "contact_supervisor"],
-		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls"],
+		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 	}) ?? "", /no mutation-capable tools/);
 
 	assert.equal(validateImplementationToolContract({
 		agent: "reviewer",
 		task: "Review only and return findings",
 		acceptanceRole: "writer",
-		tools: ["read", "grep", "find", "ls", "contact_supervisor"],
-		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls"],
+		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 	}), undefined);
 });
 
@@ -789,9 +789,9 @@ test("configured extensions do not rescue clamped-away builtin mutation tools", 
 	assert.match(validateImplementationToolContract({
 		agent: "worker",
 		task: "Fix the lane-owned workflowScript launch so writer children get mutation tools.",
-		tools: ["read", "grep", "find", "ls", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls"],
 		configuredExtensions: ["/tmp/provider.ts"],
-		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write", "contact_supervisor"],
+		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write"],
 	}) ?? "", /no mutation-capable tools/);
 });
 
@@ -799,16 +799,16 @@ test("read-only agents and pure extension workers keep their launch contracts", 
 	assert.equal(validateImplementationToolContract({
 		agent: "reviewer",
 		task: "Review the diff and return findings only.",
-		tools: ["read", "grep", "find", "ls", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls"],
 		acceptanceRole: "read-only",
 	}), undefined);
 
 	assert.equal(validateImplementationToolContract({
 		agent: "worker",
 		task: "Implement the requested source fix.",
-		tools: ["read", "grep", "find", "ls", "contact_supervisor"],
+		tools: ["read", "grep", "find", "ls"],
 		configuredExtensions: ["/tmp/mutation-extension.ts"],
-		requestedTools: ["read", "grep", "find", "ls", "contact_supervisor"],
+		requestedTools: ["read", "grep", "find", "ls"],
 	}), undefined);
 
 	assert.equal(validateImplementationToolContract({

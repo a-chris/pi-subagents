@@ -53,7 +53,6 @@ import {
 	type SteeringTargetStatus,
 	type SubagentChildStatusEvent,
 	type WorkflowLaneMetadata,
-	type HerdrMachineReference,
 	DEFAULT_MAX_OUTPUT,
 	type MaxOutputConfig,
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -91,7 +90,7 @@ import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 import { alignForkedSessionCwd } from "../../shared/fork-session-cwd.ts";
 import { outputEntryFromAsyncResult, resolveOutputReferences } from "../shared/chain-outputs.ts";
 import { clearStructuredOutputCaptures, createStructuredOutputFileCapture, createStructuredOutputRuntime, MISSING_STRUCTURED_OUTPUT_CALL_ERROR, readStructuredOutput, readStructuredOutputAcceptanceReport } from "../shared/structured-output.ts";
-import { formatMidToolExitError, isOrdinaryToolForMidToolExit, isUnexplainedProcessSignal } from "../shared/process-signal.ts";
+import { formatMidToolExitError, isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 import { formatChildToolDiagnostic } from "../shared/tool-availability.ts";
 import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTrackedMutations } from "../shared/mutation-evidence.ts";
 import { collectDynamicResults, DynamicFanoutError, materializeDynamicParallelStep, validateDynamicCollection } from "../shared/dynamic-fanout.ts";
@@ -251,7 +250,6 @@ interface StepResult {
 	toolBudgetBlocked?: boolean;
 	sessionFile?: string;
 	model?: string;
-	nativeMachine?: import("../../shared/types.ts").SingleResult["nativeMachine"];
 	thinking?: string;
 	requestedModel?: string;
 	/** True when the dispatch failed because the input exceeded the model's context window. */
@@ -692,7 +690,6 @@ interface SingleStepContext {
 	orcaProgressTab?: OrcaProgressTab;
 }
 
-/** Machine runs: a one-line hint for predictable remote failures, and a note that writer changes live on the machine. */
 export async function runSingleStepInner(
 	step: SubagentStep,
 	ctx: SingleStepContext,
@@ -850,9 +847,9 @@ export async function runSingleStepInner(
 	transcriptWriter?.writeInitialUserMessage(`${PROMPT_REDACTED}; live Prompt Audit only.`);
 
 	if (step.runner?.type === "external-cli") {
-		const externalCwd = step.machine?.cwd ?? step.cwd ?? ctx.cwd;
+		const externalCwd = step.cwd ?? ctx.cwd;
 		const externalAbortSignal = combinedAbortSignal([ctx.timeoutSignal, ctx.stopSignal]);
-		if (!step.machine && externalAbortSignal) await ctx.prepareExternalActivity?.(externalCwd, externalAbortSignal);
+		if (externalAbortSignal) await ctx.prepareExternalActivity?.(externalCwd, externalAbortSignal);
 		if (externalAbortSignal?.aborted) {
 			const stopped = ctx.stopSignal?.aborted === true;
 			const message = stopped ? ctx.stopMessage ?? "Subagent stopped by user." : ctx.timeoutMessage ?? "Subagent timed out.";
@@ -1177,7 +1174,6 @@ export async function runSingleStepInner(
 		const toolAvailabilityError = toolDiagnostic ? formatChildToolDiagnostic(toolDiagnostic) : undefined;
 		const runtimeAcknowledgedExtensions = launch.capture.runtimeAcknowledgedExtensions();
 		const midToolExitError = run.currentTool
-			&& isOrdinaryToolForMidToolExit(run.currentTool)
 			&& !run.interrupted
 			&& !run.timedOut
 			&& !run.stopped
@@ -1228,8 +1224,7 @@ export async function runSingleStepInner(
 		const completionGuardEnabled = isAgentContract(step.agentContract) ? step.completionGuard === true : step.completionGuard !== false;
 		const completionToolPlan = resolvedTaskToolPlan;
 		const completionTools = completionToolPlan ? (completionToolPlan.explicitToolAllowlist ? completionToolPlan.effectiveToolAllowlist : undefined) : step.tools;
-		const remoteGitChanged = run.nativeMachine?.initialGit && run.nativeMachine.finalGit ? run.nativeMachine.initialGit.head !== run.nativeMachine.finalGit.head || run.nativeMachine.initialGit.dirty !== run.nativeMachine.finalGit.dirty : undefined;
-		const mutationEvidence = run.nativeMachine ? { source: "tracked-files" as const, trackedOnly: true as const, changedFiles: [], attemptedMutation: remoteGitChanged === true, ...(remoteGitChanged === undefined ? { unavailable: "Remote Git before/after evidence was incomplete." } : {}) } : collectTrackedMutationEvidence(mutationSnapshot, step.cwd ?? ctx.cwd);
+		const mutationEvidence = collectTrackedMutationEvidence(mutationSnapshot, step.cwd ?? ctx.cwd);
 		finalMutationEvidence = mutationEvidence;
 		const completionMutationEvidence = ctx.trackedMutationEvidenceForCompletionGuard === false ? undefined : mutationEvidence;
 		const completionGuard = completionDiagnosticsEligible && run.exitCode === 0 && !run.error && !structuredError && !hiddenError?.hasError && !midToolExitError && !emptyOutputError && completionGuardEnabled
@@ -1464,7 +1459,6 @@ export async function runSingleStepInner(
 				task: PROMPT_REDACTED,
 				exitCode: effectiveFinalExitCode,
 				model: finalResult?.model,
-				nativeMachine: finalResult?.nativeMachine,
 				requestedModel: step.requestedModel,
 				usage,
 				error: effectiveFinalError,
@@ -1494,7 +1488,6 @@ export async function runSingleStepInner(
 		blocked: blockedReason,
 		sessionFile: step.sessionFile,
 		model: finalResult?.model,
-		nativeMachine: finalResult?.nativeMachine,
 		thinking: resolveEffectiveThinking(finalResult?.model, step.thinking),
 		requestedModel: step.requestedModel,
 		contextOverflow: contextOverflow || undefined,
@@ -1748,9 +1741,6 @@ function missingRequiredOutputAfterUsefulMutation(result: SingleStepResult): boo
 
 function partialExecutionWithUsefulMutation(result: SingleStepResult): boolean {
 	if (result.execution?.status !== "partial") return false;
-	// Pane-native external results are deliberately partial from bounded terminal
-	// evidence alone; Pi mutation-based partials retain their existing behavior.
-	if (result.runner?.type === "external-cli" && result.runner.machine) return true;
 	const fileMutation = result.effects?.fileMutation;
 	return fileMutation?.attempted === true || Boolean(fileMutation?.evidence?.changedFiles.length);
 }

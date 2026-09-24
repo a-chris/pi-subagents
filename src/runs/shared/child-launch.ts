@@ -14,7 +14,6 @@ import {
 	type LaunchResolvedChildExtensions,
 	type ResolvedToolBudget,
 	type RunFanoutBudgetDescriptor,
-	type HerdrMachineReference,
 } from "../../shared/types.ts";
 import type { NestedPathEntry } from "./nested-path.ts";
 import type { McpRuntimeSnapshotHost } from "./mcp-direct-tool-allowlist.ts";
@@ -28,7 +27,6 @@ import {
 	isSubagentRuntimeExtensionPath,
 	projectLaunchResolvedChildExtensions,
 	resolvePiLaunchToolPlan,
-	supervisorChannelDir,
 	type PiLaunchToolPlan,
 } from "./child-tool-plan.ts";
 import type { ChildRuntimeConfig } from "./child-runtime-config.ts";
@@ -63,9 +61,6 @@ export function inheritedChildRuntime(config: ChildRuntimeConfig | undefined): I
 }
 
 export interface BuildInProcessChildLaunchInput {
-	machine?: HerdrMachineReference;
-	remoteSkillNames?: string[];
-	remoteReads?: string[] | false;
 	parentSessionId?: string;
 	forkCacheKey?: string;
 	sessionEnabled: boolean;
@@ -226,12 +221,6 @@ export function buildInProcessChildLaunch(input: BuildInProcessChildLaunchInput)
 	const permissions = input.permissionRules && Object.keys(input.permissionRules).length > 0
 		? { rules: input.permissionRules, ...(input.permissionAuditPath ? { auditPath: input.permissionAuditPath } : {}) }
 		: undefined;
-	let supervisorDir: string | undefined;
-	if (input.orchestratorIntercomTarget && input.parentSessionId && input.runId) {
-		supervisorDir = supervisorChannelDir(input.runId, input.childAgentName, input.childIndex);
-		fs.mkdirSync(path.join(supervisorDir, "requests"), { recursive: true });
-		fs.mkdirSync(path.join(supervisorDir, "replies"), { recursive: true });
-	}
 	const thinkingCeiling = intersectThinkingCeilings(input.thinkingCeiling, inherited?.thinkingCeiling);
 
 	let structuredValue: unknown;
@@ -245,10 +234,7 @@ export function buildInProcessChildLaunch(input: BuildInProcessChildLaunchInput)
 		childIndex: input.childIndex,
 		fanoutChild: fanout,
 		...(input.sessionName?.trim() ? { sessionName: input.sessionName.trim() } : {}),
-		...(input.intercomSessionName ? { intercomSessionName: input.intercomSessionName } : {}),
-		...(input.orchestratorIntercomTarget ? { orchestratorTarget: input.orchestratorIntercomTarget } : {}),
-		...(input.parentSessionId ? { orchestratorSessionId: input.parentSessionId, parentSessionId: input.parentSessionId } : {}),
-		...(supervisorDir ? { supervisorChannelDir: supervisorDir } : {}),
+				...(input.parentSessionId ? { orchestratorSessionId: input.parentSessionId, parentSessionId: input.parentSessionId } : {}),
 		...(nestedRoute ? { nestedRoute } : {}),
 		...(fanout && parentRunId ? { nestedParent: { parentRunId, parentChildIndex, depth: parentDepth, path: parentPath } } : {}),
 		...(fanout && (input.runFanoutBudget ?? inherited?.runFanoutBudget) ? { runFanoutBudget: input.runFanoutBudget ?? inherited?.runFanoutBudget } : {}),
@@ -305,8 +291,6 @@ export function buildInProcessChildLaunch(input: BuildInProcessChildLaunchInput)
 		: undefined;
 	const session: Omit<ChildSessionLaunch, "onExtensionError"> = {
 		cwd: input.cwd,
-		...(input.machine ? { machine: input.machine } : {}),
-		...(input.machine ? { remoteResources: { agent: input.childAgentName, ...(input.remoteSkillNames ? { skills: input.remoteSkillNames } : {}), ...(input.remoteReads !== undefined ? { reads: input.remoteReads } : {}), ...(toolPlan.explicitToolAllowlist ? { toolCeiling: [...toolPlan.effectiveToolAllowlist] } : toolPlan.capabilityCeiling?.allowedTools ? { toolCeiling: [...toolPlan.capabilityCeiling.allowedTools] } : {}) } } : {}),
 		storage: childStorage(input),
 		...(input.model ? { model: input.model } : {}),
 		...(toolPlan.explicitToolAllowlist ? { tools: toolPlan.effectiveToolAllowlist } : {}),

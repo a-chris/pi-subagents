@@ -431,44 +431,6 @@ unsafe setup and cleanup in that process. An allocator interrupted before
 reporting its path may leave branch-only diagnostics, never an invented path.
 Inspect the handoff before reconciliation; cleanup still requires fresh checks.
 
-## Supervisor coordination (child asks parent)
-
-Child agents can talk back to the parent Pi session without installing `pi-intercom`. `pi-subagents` provides the child-facing `contact_supervisor` tool and the parent-facing `subagent_supervisor({ action: "reply" })` path natively. Generic `intercom` remains available only when an explicitly loaded external provider supplies it.
-
-Use it for work where the child might need a decision instead of guessing:
-
-```text
-Run this implementation in the background. If the worker gets blocked or needs a product decision, have it ask me through the supervisor channel.
-```
-
-```text
-Ask oracle to review this plan. If it sees a decision I need to make, have it ask me instead of assuming.
-```
-
-The child uses one dedicated coordination tool, `contact_supervisor`, with a `reason`:
-
-- `need_decision` — blocking decisions or clarification
-- `interview_request` — structured input
-- `progress_update` — short non-blocking updates when a discovery changes the plan
-
-Children should not ask for clarification when the only conflict is review-only/no-edit versus progress-writing or artifact-writing instructions; no-edit wins.
-
-The parent replies with `subagent_supervisor({ action: "reply", replyTo, message })` or checks pending requests with `subagent_supervisor({ action: "pending" })`. Supervisor messages are scoped to the exact Pi session id that spawned the child. A second Pi session in the same repository does not receive those requests.
-
-A nested coordinator needs both directions of coordination. If its agent declares an explicit `tools` allowlist, include `subagent_supervisor` to answer its own children, alongside `subagent` for delegation and `contact_supervisor` for asking its parent:
-
-```yaml
-tools: read, subagent, contact_supervisor, subagent_supervisor
-```
-
-For A → B → C, C's request belongs to B, not A. B can escalate a separate question to A with `contact_supervisor`, then answer C using C's original `replyTo` request id. A's reply to B does not resolve C's request, and steering is not a substitute for replying. Only fanout-authorized children get the downward supervisor provider; explicit tool exclusions and capability ceilings still apply, and ordinary leaves do not gain delegation or reply tools. Requesting `subagent_supervisor` without fanout authorization fails at launch with an actionable error. A coordinator that excludes the reply tool does not start downward supervision or receive prompts to use it. Explicitly selected native coordination tools survive host-builtin filtering because their providers are child runtime hooks, not host builtins.
-
-Child-side routine completion handoffs are not expected. If a child appears stalled, needs-attention notices show up in the parent session with useful next actions, such as checking `subagent({ action: "status" })`, interrupting the run, or nudging the child.
-
-If a `workflowScript` child detaches through `contact_supervisor`, the enclosing async workflow stays `paused` until that child exits. Then the extension reconciles it to `complete` or `failed`. Wait on the child until that happens.
-
-If messages do not show up, run `/subagents-doctor`. Advanced users can tune the bridge with `intercomBridge` in [configuration.md](configuration.md).
-
 ## Recursion guard
 
 Subagents can call `subagent` only when their resolved builtin tools explicitly include `subagent`. That is meant for delegated fanout agents, not ordinary worker/reviewer children. A depth guard prevents unbounded nesting.

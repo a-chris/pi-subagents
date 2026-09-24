@@ -2,9 +2,7 @@ import type {
 	ExternalCliReceiptMetadata,
 	ExternalCliCapabilityNarrowing,
 	ExternalCliRunnerStatus,
-	ExternalCliMachineStatus,
 	ExternalProcessStatus,
-	HerdrMachineReference,
 } from "../../shared/types.ts";
 
 const UNSUPPORTED = {
@@ -37,9 +35,8 @@ export function resolveExternalCliRunnerStatus(input: {
 	args?: string[];
 	promptDelivery?: "stdin";
 	capabilities?: ExternalCliCapabilityNarrowing;
-	machine?: HerdrMachineReference;
 }): ExternalCliRunnerStatus {
-	const runner: ExternalCliRunnerStatus = {
+	return {
 		type: "external-cli",
 		command: input.command,
 		args: input.args ?? [],
@@ -58,8 +55,6 @@ export function resolveExternalCliRunnerStatus(input: {
 		unsupportedReasons: UNSUPPORTED,
 		nonResumableReason: UNSUPPORTED.resume,
 	};
-	if (input.machine) runner.machine = input.machine;
-	return runner;
 }
 
 export function normalizeExternalCliRunnerStatus(value: unknown): ExternalCliRunnerStatus | undefined {
@@ -72,10 +67,7 @@ export function normalizeExternalCliRunnerStatus(value: unknown): ExternalCliRun
 		? input.args
 		: undefined;
 	const promptDelivery = input.promptDelivery === "stdin" ? "stdin" : undefined;
-	const machine = input.machine && typeof input.machine === "object" && !Array.isArray(input.machine)
-		? input.machine as HerdrMachineReference
-		: undefined;
-	return resolveExternalCliRunnerStatus({ command: input.command, args, promptDelivery, machine });
+	return resolveExternalCliRunnerStatus({ command: input.command, args, promptDelivery });
 }
 
 export function externalCliReceiptMetadata(input: {
@@ -84,7 +76,6 @@ export function externalCliReceiptMetadata(input: {
 	outputReference?: string;
 }): ExternalCliReceiptMetadata {
 	const { runner } = input;
-	const machine: ExternalCliMachineStatus | undefined = input.externalProcess?.machine ?? runner.machine;
 	const metadata: ExternalCliReceiptMetadata = {
 		adapter: { ...runner.adapter },
 		capabilities: { ...runner.capabilities },
@@ -92,10 +83,6 @@ export function externalCliReceiptMetadata(input: {
 		supervisor: { mode: "unsupported", reason: runner.unsupportedReasons.supervisor },
 		nonResumableReason: runner.nonResumableReason,
 	};
-	if (machine) {
-		metadata.machine = { ...machine };
-		if (machine.remoteGit) metadata.machine.remoteGit = { ...machine.remoteGit };
-	}
 	if (input.externalProcess) {
 		metadata.outputArtifacts = {
 			stdoutPath: input.externalProcess.stdoutPath,

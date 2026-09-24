@@ -65,7 +65,7 @@ import { assertAgentAllowedByCapabilityCeiling, intersectSubagentCapabilityCeili
 import { resolveEffectiveThinking } from "../../shared/model-info.ts";
 import { assertThinkingWithinCeiling, intersectThinkingCeilings } from "../../shared/thinking-ceiling.ts";
 import { MISSING_STRUCTURED_ACCEPTANCE_REPORT_ERROR, MISSING_STRUCTURED_OUTPUT_CALL_ERROR } from "../shared/structured-output.ts";
-import { formatMidToolExitError, isOrdinaryToolForMidToolExit } from "../shared/process-signal.ts";
+import { formatMidToolExitError } from "../shared/process-signal.ts";
 import { formatChildToolDiagnostic } from "../shared/tool-availability.ts";
 import { formatChildModelResolutionDiagnostic, isChildModelResolutionFailure } from "../shared/model-resolution-diagnostic.ts";
 import { planAbortRecovery } from "../shared/abort-recovery.ts";
@@ -378,9 +378,6 @@ async function runSingleAttempt(
 		: undefined;
 	let onWatchdogStatus: ((event: ChildWatchdogStatusEvent) => void) | undefined;
 	const launch = buildInProcessChildLaunch({
-		machine: options.machine,
-		remoteSkillNames: options.skills ?? agent.skills,
-		remoteReads: options.remoteReads,
 		extensionBindings: options.extensionBindings,
 		requiredExtensions: options.requiredExtensions,
 		sessionEnabled: shared.sessionEnabled,
@@ -427,7 +424,7 @@ async function runSingleAttempt(
 		inherited: options.childRuntime,
 		host: "parent",
 	});
-	if (!options.machine && options.parentProviderRegistry) launch.session.parentProviderRegistry = options.parentProviderRegistry;
+	if (options.parentProviderRegistry) launch.session.parentProviderRegistry = options.parentProviderRegistry;
 	const { toolPlan, capabilityAudit, warnings, launchResolvedExtensions, capture } = launch;
 	if (!shared.launchWarnings.emitted && warnings.length > 0) {
 		for (const warning of warnings) console.warn(`[pi-subagents] ${warning}`);
@@ -548,7 +545,7 @@ async function runSingleAttempt(
 		};
 		return result;
 	}
-	const mutationSnapshot = options.machine ? { source: "tracked-files" as const, trackedOnly: true as const, cwd: options.cwd ?? runtimeCwd, dirtyFiles: [], fingerprints: {}, unavailable: "Local Git evidence is not authoritative for a pane-native remote run." } : snapshotTrackedMutations(options.cwd ?? runtimeCwd);
+	const mutationSnapshot = snapshotTrackedMutations(options.cwd ?? runtimeCwd);
 	let observedMutationAttempt = false;
 	let structuredOutputToolInvoked = false;
 	let structuredOutputMessageStartIndex: number | undefined;
@@ -1266,7 +1263,6 @@ async function runSingleAttempt(
 			const toolDiagnosticError = diagnostic ? formatChildToolDiagnostic(diagnostic, { host: "parent" }) : undefined;
 			toolAvailabilityError = toolDiagnosticError;
 			result.runtimeAcknowledgedExtensions = capture.runtimeAcknowledgedExtensions();
-			if (session?.machineEvidence) result.nativeMachine = { provider: "herdr", machineId: session.machineEvidence.machineId, ...(session.machineEvidence.initial ? { initialGit: session.machineEvidence.initial } : {}), ...(session.machineEvidence.final ? { finalGit: session.machineEvidence.final } : {}) };
 			let closeError = result.error ?? toolDiagnosticError ?? assistantError;
 			const promptErrorMessage = promptError === undefined ? undefined : promptError instanceof Error ? promptError.message : String(promptError);
 			if (!closeError && promptErrorMessage !== undefined) {
@@ -1404,7 +1400,6 @@ async function runSingleAttempt(
 		return result;
 	}
 	if (progress.currentTool
-		&& isOrdinaryToolForMidToolExit(progress.currentTool)
 		&& !abortedBySignal
 		&& !result.timedOut
 		&& !result.stopped
@@ -1475,8 +1470,7 @@ async function runSingleAttempt(
 		tokens: progress.tokens,
 		durationMs: progress.durationMs,
 	};
-	const remoteGitChanged = result.nativeMachine?.initialGit && result.nativeMachine.finalGit ? result.nativeMachine.initialGit.head !== result.nativeMachine.finalGit.head || result.nativeMachine.initialGit.dirty !== result.nativeMachine.finalGit.dirty : undefined;
-	const mutationEvidence = result.nativeMachine ? { source: "tracked-files" as const, trackedOnly: true as const, changedFiles: [], attemptedMutation: remoteGitChanged === true, ...(remoteGitChanged === undefined ? { unavailable: "Remote Git before/after evidence was incomplete." } : {}) } : collectTrackedMutationEvidence(mutationSnapshot, options.cwd ?? runtimeCwd);
+	const mutationEvidence = collectTrackedMutationEvidence(mutationSnapshot, options.cwd ?? runtimeCwd);
 
 	const acceptanceOutput = getFinalOutput(result.messages ?? []);
 	let fullOutput = stripAcceptanceReport(acceptanceOutput);

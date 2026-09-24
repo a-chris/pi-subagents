@@ -67,35 +67,6 @@ async function withoutHerdr<T>(body: () => Promise<T>): Promise<T> {
 }
 
 describe("inspector and project pane authority policy", () => {
-	it("requires confirmation for project.open and fails closed without an interactive UI", async () => {
-		const { text, isError } = await run("project.open");
-
-		assert.equal(isError, true);
-		assert.match(text, /requires user confirmation for action 'project\.open'/);
-	});
-
-	it("cancels project.open when the operator declines the confirmation", async () => {
-		let asked = 0;
-		const { text } = await run("project.open", undefined, { confirm: async () => { asked += 1; return false; } });
-
-		assert.equal(asked, 1);
-		assert.match(text, /Action 'project\.open' canceled; authority was not granted\./);
-	});
-
-	it("forbids project.open outright when the policy says so", async () => {
-		const { text, isError } = await run("project.open", { projectOpen: "forbid" });
-
-		assert.equal(isError, true);
-		assert.match(text, /Authority policy forbids action 'project\.open'\./);
-	});
-
-	it("runs project.open unprompted when the policy opts back in to auto", async () => {
-		const { text } = await withoutHerdr(() => run("project.open", { projectOpen: "auto" }));
-
-		assert.doesNotMatch(text, /Authority policy/);
-		assert.match(text, /Herdr/);
-	});
-
 	it("leaves inspector.open automatic by default so the plugin gate still decides", async () => {
 		const { text } = await run("inspector.open");
 

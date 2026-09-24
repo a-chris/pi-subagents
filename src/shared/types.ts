@@ -1231,8 +1231,6 @@ export interface SingleResult {
 	messages?: Message[];
 	usage: Usage;
 	model?: string;
-	/** Authoritative before/after Git evidence captured by a pane-native remote machine. */
-	nativeMachine?: { provider: "herdr"; machineId: string; initialGit?: HerdrRemoteGitStatus; finalGit?: HerdrRemoteGitStatus };
 	/** Effective thinking level used by this foreground child, when known. */
 	thinking?: string;
 	requestedModel?: string;
@@ -1358,7 +1356,7 @@ export interface AgentCapabilityRow {
 	executable: boolean;
 	restrictionSources?: string[];
 	aliases?: string[];
-	runner: { type: "pi" } | { type: "external-cli"; adapter?: string; command: string; machine?: string; available: boolean; unavailableReason?: string; capabilities: ExternalCliCapabilities } | { type: "external-job"; provider: string; available?: boolean; capabilities: ExternalJobRunnerStatus["capabilities"] };
+	runner: { type: "pi" } | { type: "external-cli"; command: string; available: boolean; unavailableReason?: string; capabilities: ExternalCliCapabilities } | { type: "external-job"; provider: string; available?: boolean; capabilities: ExternalJobRunnerStatus["capabilities"] };
 	tools: { ambient: boolean; names: string[]; excludeTools?: string[]; mcpDirectTools: string[]; mutationTools?: string[] };
 	model?: { value?: string; thinking?: string | false };
 	execution?: { defaultAsync?: boolean; timeoutMs?: number };
@@ -1684,26 +1682,6 @@ export type AgentRunnerConfig =
 
 export type ExternalCliCapabilityNarrowing = Partial<Record<"steer" | "resume" | "structuredOutput" | "toolEvents" | "supervisor" | "forkContext" | "extensionBindings", false>>;
 
-export interface HerdrRemoteGitStatus {
-	head?: string;
-	branch?: string;
-	dirty?: boolean;
-}
-
-/** A Herdr saved SSH machine resolved for one launch. `cwd` is the directory on that machine. */
-export interface HerdrMachineReference {
-	provider: "herdr";
-	id: string;
-	label?: string;
-	target: string;
-	session?: string;
-	cwd: string;
-}
-
-export interface ExternalCliMachineStatus extends HerdrMachineReference {
-	remoteGit?: HerdrRemoteGitStatus;
-}
-
 export interface ExternalCliCapabilities {
 	stop: true;
 	steer: false;
@@ -1718,7 +1696,6 @@ export interface ExternalCliCapabilities {
 export interface ExternalCliReceiptMetadata {
 	adapter: { id: "external-cli"; version: 1; executionMode: "one-shot-stdin" };
 	capabilities: ExternalCliCapabilities;
-	machine?: ExternalCliMachineStatus;
 	outputArtifacts?: { stdoutPath?: string; stderrPath?: string; finalOutputPath?: string };
 	handoff: { mode: "fresh" };
 	supervisor: { mode: "unsupported"; reason: string };
@@ -1734,7 +1711,6 @@ export interface ExternalCliRunnerStatus {
 	capabilities: ExternalCliCapabilities;
 	unsupportedReasons: Record<Exclude<keyof ExternalCliCapabilities, "stop">, string>;
 	nonResumableReason: string;
-	machine?: HerdrMachineReference;
 }
 
 export interface ExternalJobRunnerStatus {
@@ -1786,7 +1762,6 @@ export interface ExternalProcessStatus {
 	stderrBytes?: number;
 	stdoutTruncated?: boolean;
 	stderrTruncated?: boolean;
-	machine?: ExternalCliMachineStatus;
 }
 
 export interface AsyncStatus {
@@ -2229,8 +2204,6 @@ export interface SubagentState {
 	};
 	/** Current-session top-level async capacity projection. */
 	activeAsyncCapacity?: ActiveAsyncCapacitySnapshot;
-	/** Herdr project panes opened by this Pi session, keyed by project root. */
-	herdrProjectPanes?: Map<string, HerdrProjectPaneSnapshot>;
 	asyncJobs: Map<string, AsyncJobState>;
 	/** Current-session active and recent async runs for the native fleet inspector. */
 	fleetJobs?: Map<string, AsyncJobState>;
@@ -2259,24 +2232,6 @@ export interface SubagentState {
 	workflowControllers?: Map<string, AbortController>;
 	/** Live in-process workflow child stoppers keyed by parent workflow run id. */
 	workflowChildStops?: Map<string, (childId: string, message?: string) => boolean>;
-}
-
-export interface HerdrProjectPaneSnapshot {
-	projectRoot: string;
-	bindingPath: string;
-	paneId: string;
-	openedAt: string;
-	lastFocusedAt?: string;
-	state: "open" | "stale";
-	agentStatus: string;
-	ownership: "verified" | "unknown" | "mismatch";
-	safeToClose: boolean;
-	refreshedAt: number;
-	summary?: string;
-	tabId?: string;
-	workspaceId?: string;
-	terminalTitle?: string;
-	staleReason?: string;
 }
 
 // ============================================================================
@@ -2347,15 +2302,11 @@ export interface RunSyncOptions {
 	onChildSession?: (controls: ForegroundChildSessionControls) => void;
 	/** Opt-in global permission rules; missing tools remain allowed. */
 	permissions?: import("../runs/shared/permissions.ts").PermissionConfig;
-	/** Session id of the direct parent session for permission-system ask forwarding. */
+	/** Direct parent session id for permission-system ask forwarding. */
 	parentSessionId?: string;
 	/** Resolved launch context for this child. */
 	context?: "fresh" | "fork";
 	cwd?: string;
-	/** Resolved pane-native saved-machine placement. */
-	machine?: HerdrMachineReference;
-	/** Explicit read override resolved by the remote ambient agent profile. */
-	remoteReads?: string[] | false;
 	/** Original cwd input retained for launch diagnostics. */
 	requestedCwd?: string;
 	signal?: AbortSignal;
@@ -2664,7 +2615,7 @@ export function resolveTempScopeId(options?: {
 	const getuid = options && Object.hasOwn(options, "getuid")
 		? options.getuid
 		: process.getuid?.bind(process);
-	if (typeof getuid === "function") {
+	if (getuid !== undefined) {
 		return `uid-${getuid()}`;
 	}
 

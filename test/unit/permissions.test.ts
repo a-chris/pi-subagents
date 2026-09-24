@@ -25,7 +25,6 @@ describe("native child permissions", () => {
 
 	it("rejects bash and coordination-tool rules", () => {
 		assert.throws(() => validatePermissionRules({ bash: "ask" }, "permissions"), /pi-guard/);
-		assert.throws(() => validatePermissionRules({ contact_supervisor: "deny" }, "permissions"), /reserved for child coordination/);
 		assert.throws(() => validatePermissionConfig({ rules: { write: "sometimes" } }), /allow, ask, or deny/);
 	});
 

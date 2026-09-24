@@ -77,7 +77,7 @@ runner:
 Your system prompt goes here.
 ```
 
-The runner pipes the assembled prompt to the command's stdin and treats stdout as untrusted text, not native Pi tool events. It is one-shot and stop-only: it cannot steer, resume, or claim a Pi supervisor, and structured output, fork context, and extension bindings are unavailable. External-cli runs are local only; they cannot be placed on a Herdr saved machine. Generic commands run exactly as configured, so the operator owns the security boundary: pin an explicit `command`, keep `args` minimal, resolve the command to an absolute path when the launch host does not share this shell's PATH, and never pass secrets in the prompt unless the target CLI is approved to receive them.
+The runner pipes the assembled prompt to the command's stdin and treats stdout as untrusted text, not native Pi tool events. It is one-shot and stop-only: it cannot steer, resume, or claim a Pi supervisor, and structured output, fork context, and extension bindings are unavailable. External-cli runs are local only; they cannot be placed on a remote machine. Generic commands run exactly as configured, so the operator owns the security boundary: pin an explicit `command`, keep `args` minimal, resolve the command to an absolute path when the launch host does not share this shell's PATH, and never pass secrets in the prompt unless the target CLI is approved to receive them.
 
 The bundled vendor profiles (`claude-code`, `claude-code-writer`, `codex-exec`, `codex-exec-writer`, `cursor-agent`, `cursor-agent-writer`) are removed. To use a vendor CLI, write your own `external-cli` agent with the exact command and flags you want, or run that CLI yourself.
 
@@ -122,10 +122,10 @@ You can override selected agent fields without copying the whole agent. Override
 }
 ```
 
-Supported override fields: `description`, `machine`, `output`, `outputMode`, `defaultReads`, `model`, `defaultProvider`, `thinking`, `systemPromptMode`, `inheritProjectContext`, `inheritGlobalContext`, `inheritSkills`, `defaultContext`, `acceptanceRole`, `disabled`, `skills`, `tools`, and `systemPrompt`.
+Supported override fields: `description`, `output`, `outputMode`, `defaultReads`, `model`, `defaultProvider`, `thinking`, `systemPromptMode`, `inheritProjectContext`, `inheritGlobalContext`, `inheritSkills`, `defaultContext`, `acceptanceRole`, `disabled`, `skills`, `tools`, and `systemPrompt`.
 
 - `description` replaces the discovered description for builtin and custom agents, which lets list output show deployment-specific routing or model metadata.
-- Use `output: false`, `defaultReads: false`, `defaultContext: false`, `acceptanceRole: false`, or `machine: false` to clear an inherited value.
+- Use `output: false`, `defaultReads: false`, `defaultContext: false`, or `acceptanceRole: false` to clear an inherited value.
 - Use `tools: "inherit"` when that one role should omit its bundled or frontmatter tool allowlist and receive Pi's normal builtins (plus ambient extensions when it runs as a background child).
 - Project overrides beat user overrides.
 - Matching package, user, and project agents also receive override fields, which replace the same fields declared in their frontmatter. This lets a shared agent keep its persona while local settings choose the effective model, context, tools, or other supported options.
@@ -139,29 +139,6 @@ Disable and restore:
 - `subagent({ action: "reset", agent: "reviewer" })` deletes the scope's custom agent file and/or settings override entry, restoring the bundled default. It refuses if no bundled default exists (use `delete` for purely custom agents).
 
 `eject`, `disable`, `enable`, and `reset` accept `agentScope: "user" | "project"` and operate in one scope at a time. Project overrides still win over user ones, so a project-scope disable survives a user-scope `enable` until you target the project scope.
-
-## Running agents on a Herdr saved machine
-
-Native Pi children can run on a Herdr machine (`herdr machine add <target> --label <name>`). Herdr owns each visible agent process in a fresh no-focus pane; SSH is used only as bounded transport for Herdr RPC and ownership checks. Herdr's catalog is the host allowlist; raw ssh targets are rejected.
-
-`machine` is a top-level frontmatter key, a settings override (`subagents.agentOverrides.<agent>.machine`, project beats user, `false` clears a pin), and a launch option on the `subagent` tool, workflow `runs.run`, chain, parallel, and dynamic-fanout steps. The launch option wins. Placement survives `subagent({ action: "disable" })`, `reset`, and model profile switches.
-
-`cwd` means the directory on that machine when a machine is set. An absolute path or `~/...` is used as given; a relative path joins the repo's configured machine root; with no cwd the root is used; with no root the launch fails closed naming the setting:
-
-```json
-{
-  "subagents": {
-    "agentOverrides": { "reviewer": { "machine": "workmac" } },
-    "machines": { "workmac": { "cwd": "/home/nico/proj" } }
-  }
-}
-```
-
-`machines.<label-or-id>.env` is rejected. No local API key, vendor environment, expanded prompt resource, extension path, or callback is copied. Remote runs use the machine's own credentials and managed model registry. Bounded probes and ownership checks use a fixed machine-owned PATH without sourcing shell profiles.
-
-Placed runs are detached native Pi sessions: they keep Pi's normal evidence model over the remote transport, not sanitized terminal snapshots.
-
-pi-subagents never clones, pulls, or checks out on the machine. Generic `external-cli` commands, `external-job` providers, and managed worktrees are rejected before launch; saved-machine placement accepts native Pi children only.
 
 ## Parent prompt discovery
 
@@ -262,7 +239,7 @@ Field notes:
 | `defaultProgress` | Maintain `progress.md`. |
 | `async` | Default a single-agent launch to background (`true`) or foreground (`false`) when the call omits `async`. Explicit call values and `forceTopLevelAsync` win. |
 | `timeoutMs` | Positive integer default runtime deadline in milliseconds for single-agent launches. Foreground launches use 30 minutes when neither the call nor agent provides a timeout; explicit `timeoutMs`/`maxRuntimeMs` and agent defaults win. |
-| `toolTimeoutMs` | Optional positive integer hard per-tool-call deadline in milliseconds. An explicit call value wins, then this agent default, global `toolTimeoutMs`, and `PI_SUBAGENT_TOOL_TIMEOUT_MS`. When omitted, known-fast built-in tools get a five-minute default; long-running tools get attention notices but no hard default. It does not extend the run-level deadline; `contact_supervisor`, `intercom`, and `bg_wait` are exempt. |
+| `toolTimeoutMs` | Optional positive integer hard per-tool-call deadline in milliseconds. An explicit call value wins, then this agent default, global `toolTimeoutMs`, and `PI_SUBAGENT_TOOL_TIMEOUT_MS`. When omitted, known-fast built-in tools get a five-minute default; long-running tools get attention notices but no hard default. It does not extend the run-level deadline; `bg_wait` is exempt. |
 | `acceptance` | Acceptance default for single-agent launches. Use a scalar level such as `checked` or an inline/block YAML map such as `{ level: "none", reason: "lightweight lookup" }`. Explicit call values win; chain and parallel acceptance remains task/step configuration. |
 | `acceptanceRole` | Optional `read-only` or `writer` role for automatic acceptance inference. Explicit task mutation or no-edit intent wins; otherwise the declared role replaces agent-name guessing. This does not grant or revoke tools. |
 | `mutationTools` | Comma-separated extension tool names whose calls count as mutation attempts for the completion guard. This declares evidence only; list and load each tool through `tools` and its extension provider as usual. |
@@ -340,7 +317,7 @@ How `tools` behaves:
 
 An allowlisted name does not load the extension that registers it. Load that provider through `extensions`, `subagentOnlyExtensions`, a path-like `tools` entry, or (background children only) normal Pi extension discovery.
 
-Ambient extensions depend on where the child runs. Local foreground children are sessions inside the parent Pi process and never load the parent's ambient extensions; otherwise the parent would start a second copy of each ambient extension, including this one. Background children are sessions inside the detached runner process and load the ambient extensions unless the agent sets `extensions` or the capability ceiling denies extensions. Local foreground children do inherit the providers the parent's extensions registered (`pi.registerProvider`), so their models resolve without loading those extensions again. Pane-native remote foreground children instead use the remote machine's provider discovery and configuration. Agents that need MCP tools (`mcpDirectTools`, or MCP tools from an ambient adapter such as pi-mcp-adapter) must therefore run as background children (`async: true`). A foreground launch of such an agent fails with a diagnostic that says exactly that.
+Ambient extensions depend on where the child runs. Local foreground children are sessions inside the parent Pi process and never load the parent's ambient extensions; otherwise the parent would start a second copy of each ambient extension, including this one. Background children are sessions inside the detached runner process and load the ambient extensions unless the agent sets `extensions` or the capability ceiling denies extensions. Local foreground children do inherit the providers the parent's extensions registered (`pi.registerProvider`), so their models resolve without loading those extensions again. Agents that need MCP tools (`mcpDirectTools`, or MCP tools from an ambient adapter such as pi-mcp-adapter) must therefore run as background children (`async: true`). A foreground launch of such an agent fails with a diagnostic that says exactly that.
 
 More rules:
 

@@ -14,10 +14,6 @@ export function formatMidToolExitError(input: {
 	return `Subagent process exited during '${input.toolName}' tool execution (${terminal}) before the tool completed. Earlier assistant output is not a terminal result.`;
 }
 
-export function isOrdinaryToolForMidToolExit(toolName: string): boolean {
-	return toolName !== "intercom" && toolName !== "contact_supervisor";
-}
-
 export function isUnexplainedProcessSignal(input: {
 	processSignal?: string | null;
 	interrupted?: boolean;

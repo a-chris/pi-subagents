@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type EditorComponent, isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { snapshotExternalRuns } from "../api/external-runs.ts";
 import { formatModelThinking } from "../shared/formatters.ts";
-import type { AsyncJobState, AsyncJobStep, FleetViewPlacement, HerdrProjectPaneSnapshot, HostStepState, HostStepVerdict, NestedRunSummary, NestedStepSummary, SubagentState } from "../shared/types.ts";
+import type { AsyncJobState, AsyncJobStep, FleetViewPlacement, HostStepState, HostStepVerdict, NestedRunSummary, NestedStepSummary, SubagentState } from "../shared/types.ts";
 import { projectAsyncWorkflowRows, type AsyncStatusWorkflowRow } from "../runs/shared/async-status-projection.ts";
 import { contextModeLabel } from "../runs/shared/context-mode.ts";
 import { formatWorkflowJsonPreview } from "../workflows/scripted-workflow.ts";
@@ -64,7 +64,8 @@ type FleetStatusEntry = {
 	window?: number;
 	state: string;
 	external?: true;
-	projectPane?: HerdrProjectPaneSnapshot;
+	/** Event-updated progress from the inspected host. */
+	activity?: string;
 	nestedChildren?: NestedRunSummary[];
 	workflowRows?: AsyncStatusWorkflowRow[];
 	workflowChecklist?: WorkflowChecklistProjection;
@@ -339,31 +340,6 @@ function activeLeafAgentCount(entries: FleetStatusEntry[]): number {
 	return entries.filter((entry) => !entry.workflowWrapper && !entry.surface).length;
 }
 
-function projectPaneNeedsAttention(pane: HerdrProjectPaneSnapshot): boolean {
-	return ["attention", "blocked", "paused", "failed", "error"].some((status) => pane.agentStatus.includes(status))
-		|| pane.summary?.includes("⚠") === true;
-}
-
-function projectName(projectRoot: string): string {
-	return projectRoot.split(/[\\/]/).filter(Boolean).at(-1) ?? projectRoot;
-}
-
-function projectPaneEntries(state: SubagentState): FleetStatusEntry[] {
-	return [...(state.herdrProjectPanes?.values() ?? [])]
-		.filter((pane) => pane.state === "open")
-		.sort((left, right) => left.openedAt.localeCompare(right.openedAt) || left.projectRoot.localeCompare(right.projectRoot))
-		.map((pane) => ({
-			key: `project-pane:${pane.projectRoot}`,
-			surface: "project-pane" as const,
-			agent: `${projectName(pane.projectRoot)} · ${pane.paneId}`,
-			description: pane.summary,
-			startedAt: Date.parse(pane.openedAt) || pane.refreshedAt,
-			tokens: 0,
-			state: pane.agentStatus || "unknown",
-			projectPane: pane,
-		}));
-}
-
 export function collectFleetStatusEntries(state: SubagentState): FleetStatusEntry[] {
 	const now = Date.now();
 	const entries: FleetStatusEntry[] = [];
@@ -523,7 +499,6 @@ export function collectFleetStatusEntries(state: SubagentState): FleetStatusEntr
 		}
 	}
 
-	entries.push(...projectPaneEntries(state));
 	return entries.sort((left, right) => left.startedAt - right.startedAt || left.key.localeCompare(right.key));
 }
 
@@ -762,7 +737,6 @@ export class SubagentFleetStatus {
 		if (!this.active) {
 			this.clearWorkflowCoverage();
 			const workEntries = this.entries.filter((entry) => !entry.surface);
-			const projectEntries = this.entries.filter((entry) => entry.surface === "project-pane");
 			// Workflow totals can overlap child usage and omit live lanes. Do not
 			// present either wrapper totals or an active-only sum as workflow spend.
 			const hasWorkflow = workEntries.some((entry) => entry.workflowWrapper);
@@ -778,9 +752,7 @@ export class SubagentFleetStatus {
 			const activeEntries = activeLeafAgentCount(workEntries);
 			const noun = workEntries.some((entry) => entry.external) ? "job" : "agent";
 			const agents = activeEntries > 0 ? `${activeEntries} active ${noun}${activeEntries === 1 ? "" : "s"}` : "";
-			const paneAttention = projectEntries.filter((entry) => entry.projectPane && projectPaneNeedsAttention(entry.projectPane)).length;
-			const panes = projectEntries.length > 0 ? `${projectEntries.length} pane${projectEntries.length === 1 ? "" : "s"}${paneAttention ? ` (${paneAttention} ⚠)` : ""}` : "";
-			const label = [agents, asyncRuns, panes].filter(Boolean).join(" · ");
+			const label = [agents, asyncRuns].filter(Boolean).join(" · ");
 			const nativeUsage = formatFleetTokens(tokens, window, nativeEntries.length);
 			const usage = hasWorkflow
 				? nativeEntries.length > 0 ? `standalone: ${nativeUsage} · workflow usage on child rows` : "usage on child rows"
@@ -862,9 +834,7 @@ export class SubagentFleetStatus {
 			: "";
 		const left = `${prefix} ${this.bullet(rosterIndex, selectedIndex, theme)} ${theme.fg(fleetAgentIdentityColor(entry.agent), agent)} · ${entry.state}${checklist}`;
 		const elapsed = Date.now() - entry.startedAt;
-		const rightText = entry.projectPane
-			? `${entry.projectPane.summary ?? "—"} · ${formatFleetElapsed(Date.now() - entry.projectPane.refreshedAt)} ago`
-				: entry.external ? formatFleetElapsed(elapsed) : `${formatFleetElapsed(elapsed)} · ${entry.workflowWrapper ? "usage on child rows" : formatFleetTokens(entry.tokens, entry.window)}`;
+		const rightText = entry.external ? formatFleetElapsed(elapsed) : `${formatFleetElapsed(elapsed)} · ${entry.workflowWrapper ? "usage on child rows" : formatFleetTokens(entry.tokens, entry.window)}`;
 		const right = theme.fg("dim", rightText);
 		if (unclipped) return `${left} ${right}`;
 		return rightAlign(left, right, width);
@@ -1036,7 +1006,7 @@ export class SubagentFleetStatus {
 						row.overflow,
 					]),
 				]
-				: [entry.key, entry.state, entry.external, entry.surface, entry.tokens, entry.projectPane?.refreshedAt, entry.projectPane?.summary]),
+				: [entry.key, entry.state, entry.external, entry.surface, entry.tokens]),
 		});
 	}
 

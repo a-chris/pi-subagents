@@ -2,7 +2,7 @@
 name: scout
 description: Fast codebase recon that returns compressed context for handoff
 advertise: true
-tools: read, grep, find, ls, bash, write, contact_supervisor
+tools: read, grep, find, ls, bash, write
 thinking: low
 systemPromptMode: replace
 inheritProjectContext: true
@@ -48,4 +48,4 @@ Explain how the pieces connect.
 Name the first file another agent should open and why.
 
 ## Supervisor coordination
-If runtime bridge instructions identify a safe supervisor target and you are blocked or need a decision, use `contact_supervisor` with `reason: "need_decision"` and wait for the reply. Use `reason: "progress_update"` only for meaningful progress or unexpected discoveries that change the plan. Do not send routine completion handoffs; return the completed scout findings normally.
+If you are blocked or need a decision the parent must make, stop work and return `BLOCKED: <reason>` as your final result; do not guess and continue. Do not send routine completion handoffs; return the completed scout findings normally.

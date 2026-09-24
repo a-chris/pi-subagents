@@ -332,7 +332,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		const launch = executeAsyncSingle(id, {
 			agent: "worker",
 			task: "Exercise launch digest reporting",
-			agentConfig: { ...recoveryAgentConfig, tools: ["read", "intercom", "contact_supervisor"], systemPrompt: "Base prompt\n\nIntercom orchestration channel:" },
+			agentConfig: { ...recoveryAgentConfig, tools: ["read"], systemPrompt: "Base prompt" },
 			recoveryAgentConfig,
 			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
 			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
@@ -370,7 +370,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		// through, but PI_SUBAGENT_REQUIRED_TOOLS excludes them so the 0.50 child
 		// runtime cannot fail the run over the removed native intercom (#1207).
 		const recoveryCallArgs = readMockPiArgs(mockPi, 0);
-		assert.equal(recoveryCallArgs[recoveryCallArgs.indexOf("--tools") + 1], "read,intercom,contact_supervisor");
+		assert.equal(recoveryCallArgs[recoveryCallArgs.indexOf("--tools") + 1], "read");
 		assert.deepEqual(readMockPiRequiredTools(mockPi, 0), ["read"]);
 	});
 
@@ -396,7 +396,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		const launch = executeAsyncSingle(id, {
 			agent: "worker",
 			task: "Implement the requested source fix",
-			agentConfig: makeAgent("worker", { tools: ["read", "grep", "find", "ls", "contact_supervisor"] }),
+			agentConfig: makeAgent("worker", { tools: ["read", "grep", "find", "ls"] }),
 			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
 			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
 			shareEnabled: false,
@@ -647,7 +647,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		const launch = executeAsyncChain(id, {
 			chain: [{ agent: "worker", task: "Implement the requested source fix" }],
 			resultMode: "chain",
-			agents: [makeAgent("worker", { tools: ["read", "grep", "find", "ls", "contact_supervisor"] })],
+			agents: [makeAgent("worker", { tools: ["read", "grep", "find", "ls"] })],
 			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
 			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
 			shareEnabled: false,
@@ -672,7 +672,7 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 			resultMode: "chain",
 			agents: [
 				makeAgent("producer", { completionGuard: false }),
-				makeAgent("worker", { tools: ["read", "grep", "find", "ls", "contact_supervisor"] }),
+				makeAgent("worker", { tools: ["read", "grep", "find", "ls"] }),
 			],
 			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
 			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },

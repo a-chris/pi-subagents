@@ -1,6 +1,6 @@
 # Extension and integration APIs
 
-Public seams for other Pi extensions and host integrations: the in-process RPC, the structured delegation API, launch preflight, capability ceilings, the background-work provider contract, and the Herdr integration.
+Public seams for other Pi extensions and host integrations: the in-process RPC, the structured delegation API, launch preflight, capability ceilings, and the background-work provider contract.
 
 ## Trusted workflow resources
 
@@ -446,68 +446,6 @@ subagent({ action: "inspector.close", id: "<run-id>", index: 0 })
 ```
 
 `inspector.command` returns a standalone runner command without contacting a host or writing a binding. `inspector.open` selects an available bundled inspector plugin. `status` and `close` select the plugin that owns the run binding and report clearly when that plugin does not support the requested lifecycle action. Without an available plugin, `open` fails closed with an actionable message; ordinary launches remain headless. Closing an inspector never stops the run.
-
-### Herdr inspector plugin
-
-The bundled Herdr inspector plugin supports Herdr 0.7.5+. It opens a raw dashboard pane, not the child session and not a literal attach. It reads lifecycle, status, output, and mission artifacts; steer and stop continue through pi-subagents' existing control inbox. Use `focus` only with `inspector.open`; Herdr 0.7.5 cannot focus an arbitrary existing raw pane id.
-
-### Ghostty inspector plugin
-
-Ghostty 1.3+ on macOS is the second bundled open-only plugin, using Ghostty's preview AppleScript API. It splits the focused terminal and launches the read-only inspector command; status and close are unavailable because it writes no binding. Ghostty Automation permission is required.
-
-## Herdr integration
-
-When Pi runs inside [Herdr](https://herdr.dev), pi-subagents automatically reports active async-run counts through Herdr pane metadata.
-
-- The bridge is enabled only when Herdr supplies `HERDR_ENV=1` and `HERDR_PANE_ID`; outside Herdr it registers no listeners or timers.
-- It restores current-session active runs after `/reload` or `/resume`, refreshes metadata while work is active, and clears it on completion or shutdown.
-- The bridge uses Herdr's existing `herdr:blocked` sibling event when an async child needs attention, and emits `herdr:busy` while async work remains. Herdr versions that support the sibling event keep the pane's semantic state `working`; older versions ignore it safely and still display the metadata label while the Pi integration remains the lifecycle authority.
-- The owning Pi session is the only publisher for its own pane metadata. When an active workflow has an explicit bounded `label`, the newest active label appears in the summary and compact `title-suffix`; overlapping completion restores the previous active label. Raw task and goal prompts never enter Herdr metadata. Without a label, one active run uses its agent name and two or more use the active-run count. Attention adds `⚠`, and the suffix is cleared when active work reaches zero.
-
-To show the reported label in the expanded Agent sidebar, include `state_text` or `$summary` in its row layout:
-
-```toml
-[ui.sidebar.agents]
-rows = [
-  ["state_icon", "workspace", "tab"],
-  ["agent", "state_text"],
-]
-```
-
-### Project panes
-
-For substantial work in another codebase, Herdr 0.7.5+ can open a project-owned Pi pane rooted in that repository:
-
-```ts
-subagent({ action: "project.open", cwd: "/path/to/repo", message: "Own the auth refresh mission for this project." })
-subagent({ action: "project.status", cwd: "/path/to/repo" })
-subagent({ action: "project.close", cwd: "/path/to/repo" })
-```
-
-A project pane runs its own Pi session in the target directory, so subagents launched from that pane use that project's config, agents, skills, files, git state, and missions. The parent session keeps coordination authority, but it does not own or control the subagents inside the peer pane. Existing headless runs are not moved into the pane. Pane bindings live under `<projectRoot>/.pi/subagents/project-panes/herdr.json` and are only a local pointer to the Herdr pane.
-
-Other Pi extensions should use the versioned public TypeScript surface instead of invoking the model-facing tool or importing inspector internals:
-
-```ts
-import {
-  PROJECT_PANES_API_VERSION,
-  openProjectPane,
-  getProjectPaneStatus,
-  focusProjectPane,
-  closeProjectPane,
-} from "pi-subagents/project-panes";
-
-const opened = await openProjectPane({ cwd: "/path/to/repo", focus: false });
-const status = await getProjectPaneStatus({ cwd: "/path/to/repo" });
-const focused = await focusProjectPane({ cwd: "/path/to/repo" });
-const closed = await closeProjectPane({ cwd: "/path/to/repo", requireIdle: true });
-```
-
-The API returns discriminated structured results with canonical project root, binding path, pane identity, bounded Herdr runtime fields, stable error codes, and `PROJECT_PANES_API_VERSION: 1`.
-
-- Close fails closed unless the saved pane id is still verified for that project and Herdr explicitly reports `agent_status: "idle"`. `requireIdle` is retained for callers that already pass it, but it cannot weaken that rule.
-- Focus uses the saved pane id, asks Herdr for its `tab_id` or `workspace_id`, and then calls the matching Herdr focus command.
-- The API reports `trust: "human-verification-required"`. It never bypasses or claims to attest Pi's project-trust prompt.
 
 ## Host session lifetime and completion wakes
 

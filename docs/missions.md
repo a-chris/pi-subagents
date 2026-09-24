@@ -79,8 +79,6 @@ Use `mission.list`, `mission.show`, `mission.update`, `mission.resolve-decision`
 
 Keep same-project tasks on ordinary subagents. Use an explicit `cwd` for small bounded work in another project.
 
-For substantial or long-running work in another project, open a project-owned Herdr pane with `project.open` and give that project Pi session a narrow mission/result contract (see [extension-api.md](extension-api.md#herdr-integration)). The project pane owns its own subagents; do not model it as ordinary child nesting or expect existing headless runs to move into the pane.
-
 Mission storage configuration (`missions.directory`, `retainTerminal`, `globalIndex`) is in [configuration.md](configuration.md#missions).
 
 ## Schedules

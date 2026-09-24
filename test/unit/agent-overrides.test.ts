@@ -88,31 +88,6 @@ describe("builtin agent overrides", () => {
 		assert.equal(reviewer?.modelSource, undefined);
 	});
 
-	it("applies machine placement overrides with project beating user and false clearing a pin", () => {
-		writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
-			subagents: { agentOverrides: { reviewer: { machine: "workmac" }, worker: { machine: "workmac" }, scout: { machine: "workmac" } } },
-		});
-		writeJson(path.join(tempProject, ".pi", "settings.json"), {
-			subagents: { agentOverrides: { worker: { machine: "gpu-box" }, scout: { machine: false } } },
-		});
-
-		const builtins = discoverAgentsAll(tempProject).builtin;
-		assert.equal(builtins.find((agent) => agent.name === "reviewer")?.machine, "workmac");
-		assert.equal(builtins.find((agent) => agent.name === "worker")?.machine, "gpu-box");
-		assert.equal(builtins.find((agent) => agent.name === "scout")?.machine, undefined);
-		assert.deepEqual(builtins.find((agent) => agent.name === "scout")?.override?.fields, ["machine"]);
-
-		// The disable/reset rewrite keeps a placement: the override is rebuilt from the agent's current fields.
-		const reviewer = builtins.find((agent) => agent.name === "reviewer")!;
-		assert.deepEqual(buildBuiltinOverrideConfig({ ...reviewer.override!.base }, { ...reviewer }), { machine: "workmac" });
-		assert.deepEqual(buildBuiltinOverrideConfig({ ...reviewer.override!.base, machine: "pinned" }, { ...reviewer, machine: undefined }), { machine: false });
-	});
-
-	it("rejects malformed machine overrides", () => {
-		writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), { subagents: { agentOverrides: { reviewer: { machine: 7 } } } });
-		assert.throws(() => discoverAgentsAll(tempProject), /field 'machine' must be a non-empty string or false/u);
-	});
-
 	it("rejects removed fallbackModels in user agent overrides", () => {
 		writeJson(path.join(tempHome, ".pi", "agent", "settings.json"), {
 			subagents: { agentOverrides: { worker: { fallbackModels: ["model/backup"] } } },
@@ -152,7 +127,7 @@ describe("builtin agent overrides", () => {
 
 		const builtins = discoverAgentsAll(tempProject).builtin;
 		assert.equal(builtins.find((agent) => agent.name === "researcher")?.tools, undefined);
-		assert.deepEqual(builtins.find((agent) => agent.name === "reviewer")?.tools, ["read", "grep", "find", "ls", "contact_supervisor"]);
+		assert.deepEqual(builtins.find((agent) => agent.name === "reviewer")?.tools, ["read", "grep", "find", "ls"]);
 	});
 
 	it("keeps explicit empty builtin tool allowlists distinct from inherited tools", () => {
