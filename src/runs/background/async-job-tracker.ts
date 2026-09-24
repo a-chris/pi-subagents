@@ -39,7 +39,6 @@ interface AsyncJobTrackerOptions {
 	watch?: typeof fs.watch;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
 	now?: () => number;
-	/** Resolve native supervisor requests without scanning supervisor mailboxes. */
 }
 
 const CONTROL_EVENT_READ_CHUNK_BYTES = 64 * 1024;

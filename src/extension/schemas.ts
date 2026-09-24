@@ -268,7 +268,7 @@ const ControlOverrides = Type.Object({
 	notifyOn: Type.Optional(Type.Array(Type.String({ enum: ["active_long_running", "needs_attention"] }), {
 		description: "Control event types that should notify the parent/orchestrator. Defaults to active_long_running and needs_attention.",
 	})),
-	notifyChannels: Type.Optional(Type.Array(Type.String({ enum: ["event", "async", "intercom"] }), {
+	notifyChannels: Type.Optional(Type.Array(Type.String({ enum: ["event", "async"] }), {
 		description: "Notification channels to use when available. Defaults to event and async.",
 	})),
 });
@@ -411,7 +411,7 @@ const SubagentWaitParamsSchema = Type.Object({
 		description: "Give up waiting after this many milliseconds (the runs keep going regardless). Ordinary async subagent runs already notify this session natively; use a wait timeout only when same-turn results are truly needed for provider, detached, or other background work without native notification. Defaults to config waitTool.defaultTimeoutMs, then 1800000 (30 minutes). Window expiry is a non-error active-work result.",
 	})),
 	stopOnAttention: Type.Optional(Type.Boolean({
-		description: "For a blocking wait that is truly needed, stop when a run needs attention by default. Set false to keep waiting through idle or long-thinking attention; supervisor/contact requests still stop the wait.",
+		description: "For a blocking wait that is truly needed, stop when a run needs attention by default. Set false to keep waiting through idle or long-thinking attention. Attention from a long-running or stuck child is surfaced rather than silently waited through.",
 	})),
 });
 

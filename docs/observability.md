@@ -133,7 +133,7 @@ Pi binds `Ctrl+B` to editor cursor-left by default. The extension shortcut takes
 }
 ```
 
-If something feels misconfigured, run `/subagents-doctor` or ask: "Check whether subagents and intercom are set up correctly."
+If something feels misconfigured, run `/subagents-doctor` or ask: "Check whether subagents are set up correctly."
 
 ## Host inspection protocol (RPC)
 
@@ -195,7 +195,7 @@ The result file is consumed and deleted once its completion notice is delivered.
 
 Output archives reference an existing child output artifact or session file when one is available. For children without either file, the archive stores a per-child `result-tail` entry with `resultIndex`, bounded to 64 KiB per child, and records whether it was truncated. Replay and archive JSON use `version: 1`; consumers must ignore unknown fields.
 
-Nested fanout status is stored as compact sidecar event/registry metadata and merged into parent status views and result/intercom payloads; full recursive status snapshots are not embedded in parent result files.
+Nested fanout status is stored as compact sidecar event/registry metadata and merged into parent status views and result payloads; full recursive status snapshots are not embedded in parent result files.
 
 Consumers should read these JSON files instead of scraping terminal output. Unknown fields and event types should be ignored for forward compatibility.
 
@@ -254,7 +254,7 @@ This writes bounded JSON records prefixed `PI-SUBAGENTS-NOTIFY <pid>:` to stderr
 
 - `disposed`, `missing_session`, `foreground_session_mismatch`, `not_owned`: delivery rejected by an existing guard.
 - `emit_foreground_session_mismatch`, `emit_not_owned`: ownership/session recheck rejected emission.
-- `intercom_delivered`, `deduped_ttl`: already acknowledged; no new message needed.
+- `deduped_ttl`: already acknowledged; no new message needed.
 - `deduped_pending`: shares an in-flight delivery promise.
 - `batch_deferred`: held for batching, **not lost**; look for a later emission or disposal record for the same run.
 - `send_accepted`, `send_failed`: `sendMessage` returned or threw, respectively. Acceptance is not proof the model read the message; failures remain retryable.
@@ -302,11 +302,6 @@ Async events:
 
 The `subagent:async-started` payload includes `task`, the backwards-compatible first child task truncated to 50 characters, and `goal`, the workflow-level caller task truncated to 120 characters (falling back to the first child task). Companion UI extensions can combine `goal`, `workflowGraph`, and the live lifecycle artifacts under `asyncDir` without scraping terminal output.
 
-Intercom delivery events:
+`src/extension/index.ts` registers the notification handler that consumes `subagent:async-complete`. Control/attention events are surfaced as visible parent notices and persisted for async runs.
 
-- `subagent:control-intercom`
-- `subagent:result-intercom`
-
-`src/extension/index.ts` registers the notification handler that consumes `subagent:async-complete`. Control/attention events are surfaced as visible parent notices and persisted for async runs. Native supervisor requests are delivered only to the exact parent session that spawned the child.
-
-`pi.events` is in-process only. It does not reach separate Pi processes or child subagents; use the file lifecycle artifacts or `pi-intercom` for cross-process coordination.
+`pi.events` is in-process only. It does not reach separate Pi processes or child subagents; use the file lifecycle artifacts for cross-process coordination.

@@ -12,8 +12,6 @@ export interface RunnerChildLaunchContext {
 	id: string;
 	flatIndex: number;
 	artifactsDir?: string;
-	childIntercomTarget?: string;
-	orchestratorIntercomTarget?: string;
 	nestedRoute?: BuildInProcessChildLaunchInput["nestedRoute"];
 	runFanoutBudget?: BuildInProcessChildLaunchInput["runFanoutBudget"];
 	capabilityCeiling?: BuildInProcessChildLaunchInput["capabilityCeiling"];
@@ -58,9 +56,7 @@ export function buildRunnerChildLaunch(step: RunnerSubagentStep, ctx: RunnerChil
 		extensionBindings: normalizeExtensionBindings(step.extensionBindings)?.value,
 		capabilityCeiling: step.capabilityCeiling ?? ctx.capabilityCeiling,
 		cwd: step.cwd ?? ctx.cwd,
-		intercomSessionName: ctx.childIntercomTarget,
 		sessionName: attempt.sessionName,
-		orchestratorIntercomTarget: ctx.orchestratorIntercomTarget,
 		runId: ctx.id,
 		childAgentName: step.agent,
 		childIndex: ctx.flatIndex,

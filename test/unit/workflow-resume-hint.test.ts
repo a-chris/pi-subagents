@@ -33,7 +33,7 @@ function createExecutor(state: SubagentState, cwd: string) {
 	return createSubagentExecutor({
 		pi: { events: { emit() {}, on() { return () => {}; } }, getSessionName() { return "parent"; } } as never,
 		state,
-		config: { maxSubagentDepth: 2, control: {}, intercomBridge: {} } as never,
+		config: { maxSubagentDepth: 2, control: {} } as never,
 		asyncByDefault: false,
 		tempArtifactsDir: cwd,
 		getSubagentSessionRoot: () => path.join(cwd, "sessions"),

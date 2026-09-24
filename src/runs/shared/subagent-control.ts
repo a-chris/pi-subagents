@@ -187,15 +187,15 @@ export function shouldNotifyControlEvent(config: ResolvedControlConfig, event: C
 	return config.enabled && config.notifyOn.includes(event.type);
 }
 
-export function controlNotificationKey(event: ControlEvent, childIntercomTarget?: string): string {
-	const childKey = childIntercomTarget ?? (event.index !== undefined ? `${event.runId}:${event.index}` : event.runId);
+export function controlNotificationKey(event: ControlEvent): string {
+	const childKey = event.index !== undefined ? `${event.runId}:${event.index}` : event.runId;
 	const contextHash = createHash("sha256").update(formatControlNudge(event)).digest("hex").slice(0, 8);
 	return `${childKey}:${event.type}:${event.reason ?? "idle"}:${contextHash}`;
 }
 
-export function claimControlNotification(config: ResolvedControlConfig, event: ControlEvent, seenKeys: Set<string>, childIntercomTarget?: string): boolean {
+export function claimControlNotification(config: ResolvedControlConfig, event: ControlEvent, seenKeys: Set<string>): boolean {
 	if (!shouldNotifyControlEvent(config, event)) return false;
-	const key = controlNotificationKey(event, childIntercomTarget);
+	const key = controlNotificationKey(event);
 	if (seenKeys.has(key)) return false;
 	seenKeys.add(key);
 	return true;
@@ -223,7 +223,7 @@ export function formatControlNudge(event: ControlEvent): string {
 	return "What are you blocked on? Reply with the smallest next step or ask for a decision.";
 }
 
-export function formatControlNoticeMessage(event: ControlEvent, childIntercomTarget?: string): string {
+export function formatControlNoticeMessage(event: ControlEvent): string {
 	const runTarget = event.runId;
 	if (event.reason === "completion_guard") {
 		return [
@@ -231,7 +231,6 @@ export function formatControlNoticeMessage(event: ControlEvent, childIntercomTar
 			`Run: ${runTarget}${event.index !== undefined ? ` step ${event.index + 1}` : ""}`,
 			`Signal: ${event.message}`,
 			"Next: read the output artifact or session from the subagent result, then retry with a more explicit implementation prompt or handle the fix directly.",
-			childIntercomTarget ? `Run intercom target (may be inactive): ${childIntercomTarget}` : undefined,
 		].filter((line): line is string => Boolean(line)).join("\n");
 	}
 
@@ -268,21 +267,4 @@ export function formatControlNoticeMessage(event: ControlEvent, childIntercomTar
 	].filter((line): line is string => Boolean(line)).join("\n");
 }
 
-export function formatControlIntercomMessage(event: ControlEvent, childIntercomTarget?: string): string {
-	const statusLabel = event.reason === "completion_guard"
-		? "subagent failed"
-		: event.type === "active_long_running"
-			? "subagent active but long-running"
-			: "subagent needs attention";
-	return [
-		statusLabel,
-		"",
-		event.reason === "completion_guard"
-			? `${event.agent} failed in run ${event.runId}.`
-			: event.type === "active_long_running"
-				? `${event.agent} is still active but long-running in run ${event.runId}.`
-				: `${event.agent} needs attention in run ${event.runId}.`,
-		"",
-		formatControlNoticeMessage(event, childIntercomTarget),
-	].join("\n");
-}
+	

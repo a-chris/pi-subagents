@@ -161,17 +161,17 @@ subagent runs notify the parent automatically. Use `bg_wait({ all: true })` for
 all work active at call time, `bg_wait({ id: "..." })` for one async or
 remembered detached foreground run, and `bg_wait({ timeoutMs })` to cap the
 block; active work keeps running if it elapses. `bg_wait({ stopOnAttention:
-false })` keeps a blocking wait through idle or long-thinking attention, but
-supervisor/contact requests still stop it. In a long-lived interactive parent
+false })` keeps a blocking wait through idle or long-thinking attention. In a long-lived interactive parent
 session, use `bg_wait({ id: "...", nonBlocking: true })` only for a known
 detached or otherwise non-notifying run to resolve the prefix to one exact run,
 persist an armed subscription, return immediately, and wake later on
 completion, failure, attention, reconciliation failure, or timeout. Ordinary
 status lists armed subscriptions separately from active children. This differs
 from disabling `waitTool`, which returns immediately without arming a future
-wake. If a foreground child detaches for supervisor coordination, reply first,
-then wait on its id; do not resume or launch a replacement while it remains
-detached. Headless sessions also auto-drain exact current-session work at
+wake. A foreground child can also detach before completion (for example at
+user request) and keeps working independently; wait on its id with `bg_wait`
+and recover the result via status. Do not resume or launch a replacement
+while it remains detached. Headless sessions also auto-drain exact current-session work at
 `agent_end` as a final safeguard.
 
 Providers are discovered through the `pi-subagents/background-work` registry and
@@ -284,7 +284,7 @@ subagent({ action: "schedule.delete", id: "backlog" })
 
 `schedule.create` accepts exactly one target, `workflowScript`, and exactly one trigger (`at`, or a fixed `every` interval using `m`, `h`, `d`, or `w`). Runs always launch async with fresh context and no automatic mission; mission attachment is deferred from this first slice. `overlap` is currently `skip`; `catchUp` supports `latest` and `none`. `schedule.run-due` is the headless external-launcher seam. Calendar recurrence, cron, and the schedule inspector are deferred from this first safe slice. Definitions, bounded history, append-only events, and per-run receipts remain project-scoped across Pi sessions.
 
-Humans can use `/subagents-doctor` for the same read-only report. It checks runtime paths, discovery counts, async support, current session context, and intercom bridge state.
+Humans can use `/subagents-doctor` for the same read-only report. It checks runtime paths, discovery counts, async support, current session context, and control configuration.
 
 ### Subagent control
 
@@ -322,7 +322,7 @@ subagent({
 })
 ```
 
-If the run already has an active intercom bridge target, needs-attention notifications can also prepare a compact intercom ping for the orchestrator. When a child route is available, the ping tells the orchestrator which agent needs attention and includes the exact `intercom({ action: "send", to: "..." })` target for a nudge. Do not invent a target or ask the child to self-report when no bridge exists.
+Needs-attention notifications surface a compact steer/resume suggestion plus status and interrupt commands for the orchestrator; the exact nudge is built from the run id and the child index. Do not invent a target, and never ask the child to consult the parent at runtime (children run one-shot).
 
 Steering is acknowledged delivery, not a send attempt or model-compliance signal:
 

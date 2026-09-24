@@ -64,7 +64,7 @@ function createExecutor() {
 	return createSubagentExecutor({
 		pi: { events: { emit() {}, on() { return () => {}; } }, getSessionName() { return "parent"; } } as any,
 		state: createState(),
-		config: { maxSubagentDepth: 2, control: {}, intercomBridge: {} } as any,
+		config: { maxSubagentDepth: 2, control: {} } as any,
 		asyncByDefault: false,
 		tempArtifactsDir: os.tmpdir(),
 		getSubagentSessionRoot: () => os.tmpdir(),
@@ -339,15 +339,15 @@ describe("workflow chat progress rendering", () => {
 			key: "detaches",
 			state: "detached",
 			phase: "Decision",
-			label: "supervisor handoff",
+			label: "detached at user request",
 			runId: "child-detached-123456",
-			error: "Detached for intercom coordination. Reply to the supervisor request first.",
+			error: "Detached before task completion.",
 		}];
 		const rows = buildWorkflowChatProgressRows(trace);
 		assert.equal(rows[0]?.state, "detached");
 
 		const text = componentText(renderSubagentResult({
-			content: [{ type: "text", text: "Workflow failed: Run 'detaches' detached for intercom coordination." }],
+			content: [{ type: "text", text: "Workflow failed: Run 'detaches' detached before task completion." }],
 			isError: true,
 			details: {
 				mode: "workflow",
@@ -360,7 +360,7 @@ describe("workflow chat progress rendering", () => {
 
 		assert.match(text, /workflow wf_detached_ .* same repo .* paused/);
 		assert.match(text, /Phase  Decision/);
-		assert.match(text, /detached\s+detaches supervisor handoff \[child-de\] .* Detached for intercom coordination/);
+		assert.match(text, /detached\s+detaches detached at user request \[child-de\] .* Detached before task completion/);
 		assert.doesNotMatch(text, /running\s+detaches/);
 		assert.doesNotMatch(text, /failed\s+detaches/);
 	});
@@ -499,7 +499,7 @@ describe("workflow chat progress rendering", () => {
 				chatProgress: { mode: "live-card", repoRelation: "same", repoLabel: "pi-subagents" },
 				workflow: {
 					trace: [
-						{ operation: "run", key: "handoff", state: "detached", runId: "child-detached", error: "Detached for supervisor handoff." },
+						{ operation: "run", key: "handoff", state: "detached", runId: "child-detached", error: "Detached before task completion." },
 						{ operation: "run", key: "tests", state: "failed", runId: "child-failed", error: "unit test failed" },
 					],
 					emits: [],
@@ -509,7 +509,7 @@ describe("workflow chat progress rendering", () => {
 		}, { expanded: false }, theme as any));
 
 		assert.match(text, /workflow wf_mixed_fai .* same repo .* failed/);
-		assert.match(text, /detached\s+handoff .* Detached for supervisor handoff/);
+		assert.match(text, /detached\s+handoff .* Detached before task completion/);
 		assert.match(text, /failed\s+tests .* unit test failed/);
 	});
 

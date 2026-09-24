@@ -611,11 +611,9 @@ async function runSingleAttempt(
 			receipt.exitCode = -2;
 			receipt.detached = true;
 			receipt.detachedReason = reason;
-			receipt.finalOutput = reason === "intercom coordination"
-				? "Detached for intercom coordination before task completion."
-				: reason === "user request"
-					? "Detached at user request before task completion."
-					: `Detached for ${reason} before task completion.`;
+			receipt.finalOutput = reason === "user request"
+				? "Detached at user request before task completion."
+				: `Detached for ${reason} before task completion.`;
 			receipt.outputMode = options.outputMode ?? "inline";
 			if (options.outputPath) {
 				receipt.outputSaveError = reason === "user request"

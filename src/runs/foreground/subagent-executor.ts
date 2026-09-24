@@ -348,7 +348,7 @@ export interface SubagentParamsLike {
 	scheduleOrigin?: ScheduleOrigin;
 	workflowChildAsyncId?: string;
 	workflowAwaitAsync?: boolean;
-	/** Internal async-workflow bridge: keep the live VM await pending across supervisor detachment. */
+	/** Internal async-workflow bridge: keep the live VM await pending across child detachment. */
 	workflowAwaitDetached?: boolean;
 	workflowParentDeadlineAt?: number;
 	workflowOutputClaimPath?: string;
@@ -450,8 +450,6 @@ interface ExecutorDeps {
 	discoverAgents: (cwd: string, scope: AgentScope, preferredModelProvider?: string) => { agents: AgentConfig[]; agentDiagnostics?: AgentDiscoveryDiagnostic[]; modelScope?: ModelScopeConfig; maxThinking?: AgentConfig["maxThinking"]; cwd?: string; scope?: AgentScope; directories?: UnknownAgentDiagnosticContext["directories"] };
 	onAgentsChanged?: () => void;
 	allowMutatingManagementActions?: boolean;
-	activateSupervisorTransport?: () => void;
-	findPendingAsks?: Parameters<typeof steerAsyncRun>[0]["findPendingAsks"];
 	refreshResultDelivery?: () => void;
 	trackRetainedNestedRoute?: (rootRunId: string) => void;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
@@ -913,7 +911,7 @@ function resolveForegroundResumeTarget(params: SubagentParamsLike, state: Subage
 	if (matches.length === 0) return undefined;
 	if (matches.length > 1) throw new Error(`Ambiguous foreground run id prefix '${requested}' matched: ${matches.map((run) => run.runId).join(", ")}. Provide a longer id.`);
 	const run = matches[0]!;
-	if (run.children.some((child) => child.status === "detached")) throw new Error(`Foreground run '${run.runId}' is detached for intercom coordination and cannot be revived safely while any child may still be live. Reply to the supervisor request first, then wait with bg_wait({ id: "${run.runId}" }); use status to recover the result and do not launch a replacement while it remains detached.`);
+	if (run.children.some((child) => child.status === "detached")) throw new Error(`Foreground run '${run.runId}' has a detached child and cannot be revived safely while any child may still be live; the child keeps working independently. Wait with bg_wait({ id: "${run.runId}" }) for its completion, use status to recover the result, and do not launch a replacement while it remains detached.`);
 	if (run.children.length > 1 && params.index === undefined) throw new Error(`Foreground run '${run.runId}' has ${run.children.length} children. Provide index to choose one.`);
 	const index = params.index ?? 0;
 	if (!Number.isInteger(index)) throw new Error(`Foreground run '${run.runId}' index must be an integer.`);
@@ -3868,7 +3866,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			},
 		}));
 		// Capture the owned mailbox before a child can start and finish between polling ticks.
-		if (deps.childRuntime?.fanoutChild) deps.activateSupervisorTransport?.();
 	}
 
 	const modelResponseAliases = deps.config.modelResponseAliases === undefined ? undefined : structuredClone(deps.config.modelResponseAliases);
@@ -4056,10 +4053,8 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	if (r.detached) {
 		const statusRecovery = `subagent({ action: "status", id: "${runId}" }) to recover the result; do not resume or launch a replacement while it remains detached.`;
 		const blockingRecovery = `bg_wait({ id: "${runId}" }). Use ${statusRecovery}`;
-		const message = r.detachedReason === "intercom coordination"
-			? `Detached for intercom coordination: ${params.agent}. Reply to the supervisor request first, then wait with ${blockingRecovery}`
-			: r.detachedReason === "user request"
-				? `Detached at user request: ${params.agent}. The child continues independently. Register a completion wake-up with bg_wait({ id: "${runId}", nonBlocking: true }), or use ${statusRecovery}`
+		const message = r.detachedReason === "user request"
+			? `Detached at user request: ${params.agent}. The child continues independently. Register a completion wake-up with bg_wait({ id: "${runId}", nonBlocking: true }), or use ${statusRecovery}`
 				: `Detached before task completion: ${params.agent}. Wait with ${blockingRecovery}`;
 		return {
 			content: [{ type: "text", text: `${message}${worktreeSuffix}` }],
@@ -5396,7 +5391,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					// Steering is an optional control surface, so a watcher that cannot install must not fail the run.
 					appendWorkflowEvent({ type: "subagent.workflow.steer_inbox_unavailable", error: error instanceof Error ? error.message : String(error) });
 				}
-				deps.activateSupervisorTransport?.();
 				const { workflowScript, async: _workflowAsync, chatProgress: _chatProgress, ...workflowRequest } = requestParams;
 				let workflowSteerInboxClosed = false;
 				const settleWorkflowSteerInbox = (outcome = status.state): void => {
@@ -6401,7 +6395,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						}
 						return steerAsyncRun(compactOptional<Parameters<typeof steerAsyncRun>[0]>({
 							state: deps.state,
-							findPendingAsks: deps.findPendingAsks,
 							runId,
 							message,
 							mode: resolveSteerDeliveryMode(paramsWithResolvedCwd.mode),
@@ -6447,7 +6440,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				}
 				return steerAsyncRun(compactOptional<Parameters<typeof steerAsyncRun>[0]>({
 					state: deps.state,
-					findPendingAsks: deps.findPendingAsks,
 					runId: resolved.id,
 					message,
 					mode: resolveSteerDeliveryMode(paramsWithResolvedCwd.mode),
@@ -7086,7 +7078,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			};
 			deps.state.foregroundControls.set(runId, foregroundControl);
 			deps.state.lastForegroundControlId = runId;
-			deps.activateSupervisorTransport?.();
 			deps.refreshResultDelivery?.();
 		}
 

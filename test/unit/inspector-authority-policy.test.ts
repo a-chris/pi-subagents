@@ -28,7 +28,7 @@ function createExecutor(authorityPolicy?: AuthorityPolicyConfig, childSafe = fal
 	return createSubagentExecutor({
 		pi: { events: { emit() {}, on() { return () => {}; } }, getSessionName() { return "parent"; } } as any,
 		state: createState(),
-		config: { maxSubagentDepth: 2, control: {}, intercomBridge: {}, ...(authorityPolicy ? { authorityPolicy } : {}) } as any,
+		config: { maxSubagentDepth: 2, control: {}, ...(authorityPolicy ? { authorityPolicy } : {}) } as any,
 		...(childSafe ? { allowMutatingManagementActions: false } : {}),
 		asyncByDefault: false,
 		tempArtifactsDir: os.tmpdir(),

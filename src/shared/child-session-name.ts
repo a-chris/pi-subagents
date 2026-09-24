@@ -12,9 +12,7 @@ import { PROMPT_REDACTED } from "./utils.ts";
  *  2. Into the `sessionName` field of result/progress payloads, so hosts
  *     rendering the parent stream can label each child row.
  *
- * The name is display-only metadata. When the intercom bridge is active the
- * child keeps its machine intercom target as the session name instead — that
- * name is a routing address and must win (see subagent-prompt-runtime).
+ * The name is display-only metadata.
  */
 
 /** Longest task excerpt kept in the name; the full string is capped below. */

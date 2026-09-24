@@ -161,7 +161,7 @@ function executorWithKill(state: SubagentState, kill: (pid: number, signal?: Nod
 	return createSubagentExecutor({
 		pi: { events: { emit() {}, on() { return () => {}; } }, getSessionName() { return "parent"; } } as any,
 		state,
-		config: { maxSubagentDepth: 2, control: {}, intercomBridge: {} } as any,
+		config: { maxSubagentDepth: 2, control: {} } as any,
 		asyncByDefault: false,
 		tempArtifactsDir: os.tmpdir(),
 		getSubagentSessionRoot: (parentSessionFile) => parentSessionFile ? path.join(path.dirname(parentSessionFile), path.basename(parentSessionFile, ".jsonl")) : os.tmpdir(),

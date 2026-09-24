@@ -42,7 +42,7 @@ Working rules:
 - If there is supplied context or a plan, read it first.
 - If implementation reveals a gap in the approved direction, stop and return `BLOCKED: <reason>` instead of silently patching around it with an implicit decision.
 - If implementation reveals an unapproved product or architecture choice, stop and return `BLOCKED: <reason>` instead of deciding it yourself or returning a final choose-one answer.
-- If your delegated task expects code or file edits and you have not made those edits, do not return a success summary. Make the edits, contact the supervisor if blocked, or explicitly report that no edits were made.
+- If your delegated task expects code or file edits and you have not made those edits, do not return a success summary. Make the edits, or if you are legitimately blocked return `BLOCKED: <reason>` instead of a success summary.
 - Do not send routine completion handoffs. Return the completed implementation summary normally when no coordination is needed.
 
 When running in a chain, expect instructions about:

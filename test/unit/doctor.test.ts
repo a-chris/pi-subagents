@@ -62,7 +62,6 @@ describe("buildDoctorReport", () => {
 					isAsyncAvailable: () => true,
 					discoverAgentsAll: () => ({ builtin: [], user: [], project: [], chains: [], userDir: root, projectDir: root, userChainDir: root, projectChainDir: root, userSettingsPath: path.join(root, "user.json"), projectSettingsPath: path.join(root, "project.json") }),
 					discoverAvailableSkills: () => [],
-					diagnoseIntercomBridge: () => ({ active: false, mode: "off", wantsIntercom: false, supervisorChannelAvailable: false, extensionDir: "none" }),
 				},
 			});
 			assert.match(report, /Run fan-out budget\n- configured limit: 12 \(config\)/);

@@ -77,7 +77,7 @@ runner:
 Your system prompt goes here.
 ```
 
-The runner pipes the assembled prompt to the command's stdin and treats stdout as untrusted text, not native Pi tool events. It is one-shot and stop-only: it cannot steer, resume, or claim a Pi supervisor, and structured output, fork context, and extension bindings are unavailable. External-cli runs are local only; they cannot be placed on a remote machine. Generic commands run exactly as configured, so the operator owns the security boundary: pin an explicit `command`, keep `args` minimal, resolve the command to an absolute path when the launch host does not share this shell's PATH, and never pass secrets in the prompt unless the target CLI is approved to receive them.
+The runner pipes the assembled prompt to the command's stdin and treats stdout as untrusted text, not native Pi tool events. It is one-shot and stop-only: it cannot steer or resume mid-run, and structured output, fork context, and extension bindings are unavailable. External-cli runs are local only; they cannot be placed on a remote machine. Generic commands run exactly as configured, so the operator owns the security boundary: pin an explicit `command`, keep `args` minimal, resolve the command to an absolute path when the launch host does not share this shell's PATH, and never pass secrets in the prompt unless the target CLI is approved to receive them.
 
 The bundled vendor profiles (`claude-code`, `claude-code-writer`, `codex-exec`, `codex-exec-writer`, `cursor-agent`, `cursor-agent-writer`) are removed. To use a vendor CLI, write your own `external-cli` agent with the exact command and flags you want, or run that CLI yourself.
 
@@ -416,8 +416,8 @@ What it covers:
 - **Delegation patterns**: how to select a bounded agent and single, parallel, scripted, or async shape after delegation is authorized, including fresh or forked context.
 - **Prompt workflow recipes**: how to apply the packaged techniques directly with `subagent(...)` when the user describes the workflow in natural language instead of invoking a slash command. This includes parallel review, review-loop, parallel research, parallel context-build, parallel handoff-plan, gather-context-and-clarify, and parallel cleanup.
 - **Role-agent prompting guidance**: compact contract prompts instead of long scripts, what to include in role-specific meta prompts, and retrieval budgets for researchers.
-- **Safety boundaries**: child agents must not run subagents unless their resolved builtin tools explicitly include `subagent`, must not invent intercom targets, and must escalate unapproved decisions.
-- **Intercom conventions**: when to ask vs send, and how parent-side supervisor/result delivery works through the native channel.
+- **Safety boundaries**: child agents must not run subagents unless their resolved builtin tools explicitly include `subagent`, and must escalate unapproved decisions as a terminal `BLOCKED: <reason>` status.
+- **One-shot completion**: children run one-shot and report back; there is no parent↔child messaging channel, so a child that cannot safely complete returns `BLOCKED: <reason>` and the parent decides the follow-up.
 - **Control and diagnostics**: attention signals, soft interrupts, status, and the `doctor` action.
 
 If you are writing an agent that has been asked to orchestrate subagents, the bundled skill helps it behave correctly without guessing the patterns. If you are a human user, you do not need to read it; the README and prompt shortcuts encode the same workflows in user-facing form.

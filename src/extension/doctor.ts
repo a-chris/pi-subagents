@@ -37,7 +37,6 @@ interface DoctorReportInput {
 	requestedSessionDir?: string;
 	currentSessionFile?: string | null;
 	currentSessionId?: string | null;
-	orchestratorTarget?: string;
 	sessionError?: string;
 	expandTilde?: (value: string) => string;
 	paths?: DoctorPaths;

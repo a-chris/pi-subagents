@@ -21,7 +21,6 @@ export interface ImportedAsyncRootResult {
 	exitCode: number;
 	error?: string;
 	sessionFile?: string;
-	intercomTarget?: string;
 	model?: string;
 	requestedModel?: string;
 	contextOverflow?: boolean;
@@ -62,7 +61,6 @@ interface AsyncResultFile {
 		execution?: ExecutionProjection;
 		effects?: EffectsProjection;
 		sessionFile?: string;
-		intercomTarget?: string;
 		model?: string;
 		requestedModel?: string;
 		contextOverflow?: boolean;
@@ -206,7 +204,6 @@ function buildImportedResult(root: ImportedAsyncRoot, status: AsyncStatus | null
 		...(stopped ? { stopped: true } : {}),
 		...(child?.sessionName ?? step?.sessionName ? { sessionName: child?.sessionName ?? step?.sessionName } : {}),
 		...(child?.sessionFile ?? step?.sessionFile ?? status?.sessionFile ? { sessionFile: child?.sessionFile ?? step?.sessionFile ?? status?.sessionFile } : {}),
-		...(child?.intercomTarget ? { intercomTarget: child.intercomTarget } : {}),
 		...(child?.model ?? step?.model ? { model: child?.model ?? step?.model } : {}),
 		...(child?.requestedModel ?? step?.requestedModel ? { requestedModel: child?.requestedModel ?? step?.requestedModel } : {}),
 		...(child?.contextOverflow || step?.contextOverflow ? { contextOverflow: true } : {}),

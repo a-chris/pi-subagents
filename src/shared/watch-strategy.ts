@@ -1,6 +1,5 @@
 export type FileWatchPurpose =
 	| "result-delivery"
-	| "supervisor-channel"
 	| "async-job-tracker"
 	| "retained-nested-route-tracker"
 	| "runner-control-inbox"

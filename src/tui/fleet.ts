@@ -1292,7 +1292,7 @@ export class SubagentFleetComponent implements Component {
 					const conversationState = latest?.kind === "assistant"
 						? "assistant response"
 						: latest?.kind === "user"
-							? "supervisor message"
+							? "parent message"
 							: latest?.kind === "tool"
 								? `${latest.name} · ${latest.status}`
 								: "activity";

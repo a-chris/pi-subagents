@@ -73,18 +73,6 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
 	return result.content.map((c) => c.text ?? "").join("");
 }
 
-function assertSupervisorYield(
-	result: Awaited<ReturnType<typeof waitForSubagents>>,
-	activeRunIds: string[],
-	activeProviderItems: Array<{ provider: string; id: string }> = [],
-): void {
-	assert.equal(result.isError, undefined);
-	assert.deepEqual(result.details.wait, { reason: "supervisor_request", timedOut: false, activeRunIds, activeProviderItems });
-	assert.match(textOf(result), /yielded for a pending supervisor request/i);
-	assert.doesNotMatch(textOf(result), /(?:done|complete|window elapsed)/i);
-	assert.equal(result.details.completions, undefined);
-}
-
 function baseDeps(root: string, state: SubagentState, overrides: Partial<SubagentWaitDeps> = {}): SubagentWaitDeps {
 	return {
 		state,

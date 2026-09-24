@@ -151,7 +151,7 @@ The DTO intentionally never exposes run, async, or tool IDs. Clients must ignore
 
 ### Scope
 
-`pi.events` is in-process only. It does not reach separate Pi processes or child subagents; use the file lifecycle artifacts or `pi-intercom` for cross-process coordination.
+`pi.events` is in-process only. It does not reach separate Pi processes or child subagents; use the file lifecycle artifacts for cross-process coordination.
 
 ## Runtime agent registration from independent extensions
 

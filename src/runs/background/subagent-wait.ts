@@ -87,7 +87,7 @@ export interface SubagentWaitParams {
 	all?: boolean;
 	/** Give up after this many milliseconds. Defaults to waitTool.defaultTimeoutMs, then 30 minutes. */
 	timeoutMs?: number;
-	/** False keeps a blocking wait open through idle attention; supervisor/contact requests still stop the wait. */
+	/** False keeps a blocking wait open through idle or long-thinking attention. */
 	stopOnAttention?: boolean;
 }
 
@@ -493,7 +493,7 @@ function detachedForegroundWaitUpdate(run: ForegroundResumeRun, pendingIndices: 
 		if (!pendingIndices.has(child.index) || child.status !== "detached") continue;
 		const activity = readTranscriptActivity(child.transcriptPath);
 		const age = activity?.latestAt !== undefined ? ` · activity ${formatDuration(Math.max(0, nowMs - activity.latestAt))} ago` : "";
-		lines.push(`${child.agent} · working after supervisor handoff${age}`);
+		lines.push(`${child.agent} · still working${age}`);
 		if (activity?.currentTool) {
 			lines.push(`  current: ${activity.currentTool}${activity.currentToolArgs ? `: ${activity.currentToolArgs}` : ""}`);
 		}
@@ -516,7 +516,7 @@ async function waitForDetachedForegroundRun(
 	const initialDetachedIndices = new Set(run.children.filter((child) => child.status === "detached").map((child) => child.index));
 	while (true) {
 		if (deps.state.currentSessionId !== run.sessionId) {
-			return result(`Wait stopped because the active session changed while remembered foreground run "${run.runId}" was still detached. Return to the originating session to inspect or wait for it. Reply to any pending supervisor request before resuming or launching a replacement.`, true);
+			return result(`Wait stopped because the active session changed while remembered foreground run "${run.runId}" was still detached. Return to the originating session to inspect or wait for it; do not resume or launch a replacement while it remains detached.`, true);
 		}
 		const current = deps.state.foregroundRuns?.get(run.runId);
 		if (!current || current.sessionId !== run.sessionId) {
@@ -534,11 +534,11 @@ async function waitForDetachedForegroundRun(
 		const updateNow = now();
 		deps.onUpdate?.(detachedForegroundWaitUpdate(current, initialDetachedIndices, updateNow, updateNow - startedAt));
 		if (signal?.aborted) {
-			return result(`Wait aborted after ${formatDuration(now() - startedAt)}. Remembered foreground run "${run.runId}" remains detached. Reply to any pending supervisor request before resuming or launching a replacement.`, true);
+			return result(`Wait aborted after ${formatDuration(now() - startedAt)}. Remembered foreground run "${run.runId}" remains detached; do not resume or launch a replacement while it remains detached.`, true);
 		}
 		if (now() - startedAt >= timeoutMs) {
 			return windowElapsedResult(
-				`Wait window elapsed after ${formatDuration(timeoutMs)} with remembered foreground run "${run.runId}" still detached. Reply to any pending supervisor request, then call bg_wait({ id: "${run.runId}" }) again or inspect status; do not resume or launch a replacement while it remains detached.`,
+				`Wait window elapsed after ${formatDuration(timeoutMs)} with remembered foreground run "${run.runId}" still detached. Call bg_wait({ id: "${run.runId}" }) again or inspect status; do not resume or launch a replacement while it remains detached.`,
 				[run.runId],
 			);
 		}

@@ -5,7 +5,7 @@ import { buildSkillInjection } from "../../agents/skills.ts";
 import { injectOutputPathSystemPrompt } from "./single-output.ts";
 
 export interface EffectiveSystemPromptInput {
-	/** Agent as handed to the child, including runtime-declared overlays such as the Intercom bridge. */
+	/** Agent as handed to the child, including runtime-declared overlays. */
 	agent: AgentConfig;
 	resolvedSkills: Parameters<typeof buildSkillInjection>[0];
 	/** Directory that scopes memory and refinement lookups. */

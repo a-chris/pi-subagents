@@ -129,7 +129,7 @@ function startNestedControlInboxListener(pi: ExtensionAPI, state: SubagentState,
 	return () => clearInterval(timer);
 }
 
-/** Register delegation and supervisor replies for fanout-authorized children. */
+/** Register delegation for fanout-authorized children. */
 export default function registerFanoutChildSubagentExtension(pi: ExtensionAPI, childConfig: ChildRuntimeConfig): void {
 	if (!childConfig.fanoutChild) return;
 

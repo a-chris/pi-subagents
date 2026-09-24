@@ -1124,7 +1124,7 @@ setTimeout(() => process.exit(90), 15000).unref();
 				activeNoticeAfterTokens: 999_999,
 				failedToolAttemptsBeforeAttention: 3,
 				notifyOn: ["active_long_running", "needs_attention"],
-				notifyChannels: ["event", "async", "intercom"],
+				notifyChannels: ["event", "async"],
 			},
 		});
 
@@ -1190,7 +1190,7 @@ setTimeout(() => process.exit(90), 15000).unref();
 				activeNoticeAfterMs: 999_999,
 				failedToolAttemptsBeforeAttention: 3,
 				notifyOn: ["active_long_running", "needs_attention"],
-				notifyChannels: ["event", "async", "intercom"],
+				notifyChannels: ["event", "async"],
 			},
 		});
 
@@ -1253,7 +1253,7 @@ setTimeout(() => process.exit(90), 15000).unref();
 				activeNoticeAfterMs: 100,
 				failedToolAttemptsBeforeAttention: 3,
 				notifyOn: ["needs_attention"],
-				notifyChannels: ["event", "async", "intercom"],
+				notifyChannels: ["event", "async"],
 			},
 		});
 
@@ -1317,7 +1317,7 @@ setTimeout(() => process.exit(90), 15000).unref();
 				activeNoticeAfterTokens: 999_999,
 				failedToolAttemptsBeforeAttention: 3,
 				notifyOn: ["active_long_running", "needs_attention"],
-				notifyChannels: ["event", "async", "intercom"],
+				notifyChannels: ["event", "async"],
 			},
 		});
 

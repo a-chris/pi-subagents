@@ -112,7 +112,7 @@ export function submitInspectorControl(options: RunnerOptions, line: string): st
 		if (!message) throw new Error("steer requires a message.");
 		return queueInspectorSteer(options, status, message);
 	}
-	if (command.startsWith("reply ")) throw new Error("This inspector is read-only; supervisor replies happen in the parent Pi session.");
+	if (command.startsWith("reply ")) throw new Error("Reply-style commands are gone: children run one-shot. Steer or resume from the parent session instead.");
 	if (options.index === undefined && status.mode !== "single") throw new Error("Plain guidance requires a child-specific inspector. Use steer <message> to target all running children from the aggregate inspector.");
 	return queueInspectorSteer(options, status, command);
 }

@@ -50,7 +50,7 @@ function createExecutor(state = createState(), agents: Array<Record<string, unkn
 	return createSubagentExecutor({
 		pi: { events, getSessionName() { return "parent"; } } as any,
 		state,
-		config: { maxSubagentDepth: 2, control: {}, intercomBridge: {} } as any,
+		config: { maxSubagentDepth: 2, control: {} } as any,
 		asyncByDefault: false,
 		tempArtifactsDir: os.tmpdir(),
 		getSubagentSessionRoot: (parentSessionFile) => parentSessionFile ? path.join(path.dirname(parentSessionFile), path.basename(parentSessionFile, ".jsonl")) : os.tmpdir(),
@@ -336,7 +336,7 @@ describe("nested control routing", () => {
 		try {
 			const emitted: Array<{ name: string; payload: unknown }> = [];
 			const events = { emit(name: string, payload: unknown) { emitted.push({ name, payload }); }, on() { return () => {}; } };
-			const route = createNestedRun("nested-live-resume", "running", { intercomTarget: "attacker-target", leafIntercomTarget: "attacker-leaf" });
+			const route = createNestedRun("nested-live-resume", "running");
 			const executor = createExecutor(stateWithNestedRoute(route), [], true, events);
 			const responder = (async () => {
 				const deadline = Date.now() + 2_000;

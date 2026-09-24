@@ -490,20 +490,6 @@ describe("scripted workflow runtime", () => {
 		assert.deepEqual(emitSnapshots, [1]);
 	});
 
-	it("passes a per-run intercom bridge override to the host launch", async () => {
-		let launchParams: Record<string, unknown> | undefined;
-		await runWorkflowScript({
-			script: `return runs.run("isolated", { agent: "worker", task: "Run", intercomBridge: { mode: "off" } });`,
-			async launch(key, params) {
-				launchParams = params;
-				return { key, ok: true, output: "done", artifactPaths: [] };
-			},
-			async status(key) { return { key, ok: true, output: "ok", artifactPaths: [] }; },
-		});
-
-		assert.deepEqual(launchParams?.intercomBridge, { mode: "off" });
-	});
-
 	it("resolves a keyed workflow receipt despite an invalid current worktree source", async (t) => {
 		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-receipt-resume-"));
 		t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));

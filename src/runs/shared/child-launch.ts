@@ -83,9 +83,7 @@ export interface BuildInProcessChildLaunchInput {
 	mcpDirectTools?: string[];
 	extensionBindings?: ExtensionBindings;
 	cwd: string;
-	intercomSessionName?: string;
 	sessionName?: string;
-	orchestratorIntercomTarget?: string;
 	runId?: string;
 	childAgentName: string;
 	childIndex: number;

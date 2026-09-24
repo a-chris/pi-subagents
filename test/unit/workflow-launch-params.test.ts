@@ -230,26 +230,6 @@ describe("workflow launch params", () => {
 		);
 	});
 
-	it("keeps a bridge override scoped to the target workflow child", () => {
-		assert.deepEqual(
-			prepareWorkflowLaunchParams(
-				{},
-				{ agent: "worker", task: "Run", intercomBridge: { mode: "off" } },
-				"workflow-run",
-				"isolated",
-			),
-			{
-				agent: "worker",
-				task: "Run",
-				intercomBridge: { mode: "off" },
-				workflowAwaitAsync: true,
-				workflowParentRunId: "workflow-run",
-				workflowKey: "isolated",
-			},
-		);
-		assert.equal(prepareWorkflowLaunchParams({}, { agent: "worker", task: "Run" }, "workflow-run", "sibling").intercomBridge, undefined);
-	});
-
 	it("canonicalizes child extension bindings without leaking them to siblings", () => {
 		const bindings = { "shepherd.dispatch/1": { writeScope: ["src/a.ts"], role: "coder" } };
 		const child = prepareWorkflowLaunchParams({ extensionBindings: { "defaults.policy/1": true } }, { agent: "worker", task: "Run", extensionBindings: bindings }, "workflow-run", "bound");

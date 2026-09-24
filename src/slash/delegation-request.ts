@@ -22,7 +22,6 @@ const supportedFields = new Set([
 	"toolBudget",
 	"skill",
 	"artifacts",
-	"intercomBridge",
 	"result",
 ]);
 

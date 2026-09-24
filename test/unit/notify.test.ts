@@ -390,7 +390,7 @@ describe("registerSubagentNotify", () => {
 			agent: "workflow",
 			success: false,
 			state: "paused",
-			summary: "Run 'detaches' detached for intercom coordination.",
+			summary: "Run 'detaches' detached before task completion.",
 			results: [{ workflowKey: "detaches", agent: "worker", runId: "child-1", status: "paused", success: false }],
 			timestamp: 790,
 			sessionId: "session-1",
@@ -401,7 +401,7 @@ describe("registerSubagentNotify", () => {
 		assert.deepEqual(sent[0], {
 			message: {
 				customType: "subagent-notify",
-				content: "Background task paused: **workflow**\n\nRun 'detaches' detached for intercom coordination.\n\nChild outputs:\n- key=detaches run=child-1 status=paused\n  Saved output: unavailable\n  Preview: unavailable (no safe inline output)\n\nWorkflow run: workflow-1\nChild runs: detaches=child-1 (paused)",
+				content: "Background task paused: **workflow**\n\nRun 'detaches' detached before task completion.\n\nChild outputs:\n- key=detaches run=child-1 status=paused\n  Saved output: unavailable\n  Preview: unavailable (no safe inline output)\n\nWorkflow run: workflow-1\nChild runs: detaches=child-1 (paused)",
 				display: true,
 			},
 			options: { triggerTurn: true },
@@ -615,7 +615,7 @@ describe("completion formatting helpers", () => {
 			agent: "workflow",
 			success: false,
 			state: "paused",
-			summary: "Run 'review' detached for supervisor handoff.",
+			summary: "Run 'review' detached before task completion.",
 			reconciledFromDetachedChild: "child-2",
 			results: [{ workflowKey: "review", agent: "reviewer", runId: "child-2", status: "paused" }],
 		});

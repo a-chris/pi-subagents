@@ -14,7 +14,7 @@ function pausedWorkflow(childRunId: string, extra?: Partial<NonNullable<AsyncSta
 		state: "paused",
 		startedAt: 1,
 		activityState: "needs_attention",
-		error: "Run 'worker' detached for intercom coordination.",
+		error: "Run 'worker' detached before task completion.",
 		steps: [{
 			agent: "worker",
 			workflowKey: "detaches",
@@ -255,7 +255,7 @@ describe("reconcileDetachedWorkflowChildCompletion", () => {
 		}), true);
 		const paused = JSON.parse(fs.readFileSync(path.join(asyncDir, "status.json"), "utf-8")) as { state?: string; error?: string; steps?: Array<{ runId?: string; error?: string }> };
 		assert.equal(paused.state, "paused");
-		assert.equal(paused.error, "Run 'worker' detached for intercom coordination.");
+		assert.equal(paused.error, "Run 'worker' detached before task completion.");
 		assert.equal(paused.steps?.find((step) => step.runId === "child-failed")?.error, "sibling boom");
 		assert.equal(reconcileDetachedWorkflowChildCompletion({
 			state,

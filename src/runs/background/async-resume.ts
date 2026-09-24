@@ -76,7 +76,7 @@ interface AsyncResultFile {
 	thinking?: string;
 	launchContractDigest?: string;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
-	results?: Array<{ agent?: string; sessionName?: string; success?: boolean; sessionFile?: string; intercomTarget?: string; model?: string; thinking?: string; launchContractDigest?: string; capabilityCeiling?: ResolvedSubagentCapabilityCeiling }>;
+	results?: Array<{ agent?: string; sessionName?: string; success?: boolean; sessionFile?: string; model?: string; thinking?: string; launchContractDigest?: string; capabilityCeiling?: ResolvedSubagentCapabilityCeiling }>;
 }
 
 export interface AsyncRunLocation {
@@ -114,14 +114,13 @@ function validateResultFile(value: unknown, resultPath: string): AsyncResultFile
 			const agent = validateOptionalString(child, "agent", resultPath, `results[${index}].agent`);
 			const sessionFile = validateOptionalString(child, "sessionFile", resultPath, `results[${index}].sessionFile`);
 			const sessionName = validateOptionalString(child, "sessionName", resultPath, `results[${index}].sessionName`);
-			const intercomTarget = validateOptionalString(child, "intercomTarget", resultPath, `results[${index}].intercomTarget`);
 			const model = validateOptionalString(child, "model", resultPath, `results[${index}].model`);
 			const thinking = validateOptionalString(child, "thinking", resultPath, `results[${index}].thinking`);
 			const launchContractDigest = validateOptionalString(child, "launchContractDigest", resultPath, `results[${index}].launchContractDigest`);
 			const capabilityCeiling = child.capabilityCeiling === undefined ? undefined : parseSubagentCapabilityCeiling(child.capabilityCeiling, `async result file '${resultPath}' results[${index}].capabilityCeiling`);
 			const success = child.success;
 			if (success !== undefined && typeof success !== "boolean") throw new Error(`Invalid async result file '${resultPath}': results[${index}].success must be a boolean.`);
-			return { agent, sessionName, sessionFile, intercomTarget, model, thinking, launchContractDigest, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(typeof success === "boolean" ? { success } : {}) };
+			return { agent, sessionName, sessionFile, model, thinking, launchContractDigest, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(typeof success === "boolean" ? { success } : {}) };
 		});
 	}
 	const success = data.success;
@@ -428,9 +427,11 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 			if (control[field] !== undefined && (!Number.isInteger(control[field]) || (control[field] as number) < 1)) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': controlConfig.${field} must be a positive integer.`);
 		}
 		if (!Array.isArray(control.notifyOn) || control.notifyOn.some((item) => item !== "active_long_running" && item !== "needs_attention")) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': controlConfig.notifyOn is invalid.`);
-		if (!Array.isArray(control.notifyChannels) || control.notifyChannels.some((item) => item !== "event" && item !== "async" && item !== "intercom")) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': controlConfig.notifyChannels is invalid.`);
+		if (!Array.isArray(control.notifyChannels) || control.notifyChannels.some((item) => item !== "event" && item !== "async")) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': controlConfig.notifyChannels is invalid.`);
 	}
 	if (parsed.acceptance !== undefined) parsed.acceptance = normalizeRecoveryAcceptance(parsed.acceptance, descriptorPath);
+	// SAFETY: every field was validated against its schema above, so the double cast only
+	// narrows the parsed record's widened field types to the typed steering descriptor.
 	return parsed as unknown as SteeringRecoveryDescriptor;
 }
 
