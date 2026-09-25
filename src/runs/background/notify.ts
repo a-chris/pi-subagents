@@ -16,7 +16,7 @@ import {
 	createCompletionBatcher,
 	resolveCompletionBatchConfig,
 } from "./completion-batcher.ts";
-import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ChildWatchdogProgress, type ChildWatchdogWarningSummary, type ParallelHandoffReference, type SubagentState } from "../../shared/types.ts";
+import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ParallelHandoffReference, type SubagentState } from "../../shared/types.ts";
 import { safeTerminalText } from "../../shared/display-text.ts";
 import { isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 import type { ResultDeliveryOwnership } from "./result-delivery-ownership.ts";
@@ -36,8 +36,6 @@ export interface SubagentNotifyChildOutput {
 	previewUnavailableReason?: string;
 }
 
-export type SubagentNotifyWatchdogBlocker = Pick<ChildWatchdogWarningSummary, "summary" | "addressed" | "stalemate"> & { agent: string };
-
 export interface SubagentNotifyDetails {
 	workflowReceiptPath?: string;
 	asyncDir?: string;
@@ -54,7 +52,6 @@ export interface SubagentNotifyDetails {
 	sessionLabel?: string;
 	sessionValue?: string;
 	handoffPath?: string;
-	watchdogBlockers?: SubagentNotifyWatchdogBlocker[];
 }
 
 export interface IncrementalChildCompletion {
@@ -106,9 +103,7 @@ export interface CompletionNotification {
 		timedOut?: boolean;
 		stopped?: boolean;
 		turnBudgetExceeded?: boolean;
-		watchdog?: ChildWatchdogProgress;
 	}>;
-	watchdog?: ChildWatchdogProgress;
 	timestamp?: number;
 	durationMs?: number;
 	cwd?: string;
@@ -299,35 +294,15 @@ function formatCorrelationLines(details: SubagentNotifyDetails): string[] {
 	].filter((line): line is string => line !== undefined);
 }
 
-const WATCHDOG_BLOCKERS_HEADING = "Watchdog blockers:";
-
-function formatWatchdogBlockerLines(details: SubagentNotifyDetails): string[] {
-	if (!details.watchdogBlockers?.length) return [];
-	return [WATCHDOG_BLOCKERS_HEADING, ...details.watchdogBlockers.map((blocker) => `- ${blocker.agent}: ${blocker.summary} (${blocker.stalemate ? "stalemate" : blocker.addressed ? "addressed" : "unaddressed"})`)];
-}
-
-// A stalemate blocker parses back as unaddressed; acceptance treats both as unresolved.
-function parseWatchdogBlockerLines(lines: string[]): SubagentNotifyWatchdogBlocker[] {
-	const blockers: SubagentNotifyWatchdogBlocker[] = [];
-	for (const line of lines) {
-		const match = line.match(/^- (.+?): (.+) \((addressed|unaddressed|stalemate)\)$/);
-		if (!match) break;
-		blockers.push({ agent: match[1]!, summary: match[2]!, addressed: match[3] === "addressed", stalemate: match[3] === "stalemate" });
-	}
-	return blockers;
-}
-
 export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 	const sessionLine = formatSessionLine(details);
 	const correlationLines = formatCorrelationLines(details);
-	const watchdogLines = formatWatchdogBlockerLines(details);
 	const taskKind = details.source === "foreground" ? "Detached foreground task" : "Background task";
 	return [
 		`${taskKind} ${details.status}: **${details.agent}**${details.taskInfo ?? ""}`,
 		details.workflowReceiptPath ? `Workflow receipt: ${details.workflowReceiptPath}` : undefined,
 		"",
 		formatResultPreview(details),
-		...(watchdogLines.length ? ["", ...watchdogLines] : []),
 		details.handoffPath ? "" : undefined,
 		details.handoffPath ? `Parallel handoff: ${details.handoffPath}` : undefined,
 		correlationLines.length && !details.handoffPath ? "" : undefined,
@@ -383,9 +358,7 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 	const workflowRunIndex = body.findIndex((line) => line.startsWith("Workflow run: "));
 	const childRunsIndex = body.findIndex((line) => line.startsWith("Child runs: "));
 	const reconciledIndex = body.findIndex((line) => line.startsWith("Reconciled detached child: "));
-	const watchdogIndex = body.findIndex((line) => line === WATCHDOG_BLOCKERS_HEADING);
-	const watchdogBlockers = watchdogIndex >= 0 ? parseWatchdogBlockerLines(body.slice(watchdogIndex + 1)) : [];
-	const metadataIndexes = [sessionIndex, handoffIndex, workflowRunIndex, childRunsIndex, reconciledIndex, watchdogIndex].filter((index) => index >= 0);
+const metadataIndexes = [sessionIndex, handoffIndex, workflowRunIndex, childRunsIndex, reconciledIndex].filter((index) => index >= 0);
 	const firstMetadataIndex = metadataIndexes.length ? Math.min(...metadataIndexes) : body.length;
 	const resultEnd = firstMetadataIndex > 0 && body[firstMetadataIndex - 1]?.trim() === "" ? firstMetadataIndex - 1 : firstMetadataIndex;
 	const resultPreview = body.slice(0, resultEnd).join("\n").trim() || "(no output)";
@@ -421,7 +394,6 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 		...(workflowRunId ? { workflowRunId } : {}),
 		...(childRuns?.length ? { childRuns } : {}),
 		...(reconciledFromDetachedChild ? { reconciledFromDetachedChild } : {}),
-		...(watchdogBlockers.length ? { watchdogBlockers } : {}),
 		...(sessionLabel && sessionValue ? { sessionLabel, sessionValue } : {}),
 	};
 }
@@ -436,7 +408,6 @@ export function formatGroupedCompletion(details: SubagentNotifyDetails[]): strin
 		blocks.push(`${index + 1}. ${detail.agent}${detail.taskInfo ?? ""}`);
 		if (detail.workflowReceiptPath) blocks.push(`Workflow receipt: ${detail.workflowReceiptPath}`);
 		blocks.push(formatResultPreview(detail));
-		blocks.push(...formatWatchdogBlockerLines(detail));
 		if (detail.handoffPath) blocks.push(`Parallel handoff: ${detail.handoffPath}`);
 		blocks.push(...formatCorrelationLines(detail));
 		if (sessionLine) blocks.push(sessionLine);
@@ -594,17 +565,6 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 		: undefined;
 	const reconciledFromDetachedChild = typeof result.reconciledFromDetachedChild === "string" ? result.reconciledFromDetachedChild : undefined;
 	const asyncDir = nonemptyPath(result.asyncDir);
-	const watchdogBlockers: SubagentNotifyWatchdogBlocker[] = [];
-	const watchdogConcerns: string[] = [];
-	const collectWatchdogFindings = (owner: string, progress: ChildWatchdogProgress | undefined) => {
-		for (const warning of progress?.warnings ?? []) {
-			if (warning.importance !== "high") continue;
-			if (warning.severity === "blocker") watchdogBlockers.push({ agent: owner, summary: warning.summary, addressed: warning.addressed, stalemate: warning.stalemate });
-			else watchdogConcerns.push(`${owner}: ${warning.summary}\nEvidence: ${warning.evidence}\nRecommended action: ${warning.recommendedAction}`);
-		}
-	};
-	collectWatchdogFindings(agent, result.watchdog);
-	for (const child of result.results ?? []) collectWatchdogFindings(typeof child.agent === "string" ? child.agent : agent, child.watchdog);
 	const session =
 		result.shareUrl
 			? { label: "Session", value: result.shareUrl }
@@ -620,14 +580,13 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 		...(asyncDir ? { asyncDir } : {}),
 		...(result.source ? { source: result.source } : {}),
 		...(taskInfo ? { taskInfo } : {}),
-		resultPreview: watchdogConcerns.length ? `${resultPreview}\n\nHigh-importance watchdog concerns:\n${watchdogConcerns.map((warning) => `- ${warning}`).join("\n")}` : resultPreview,
+		resultPreview,
 		...(typeof result.durationMs === "number" ? { durationMs: result.durationMs } : {}),
 		...(handoffPath ? { handoffPath } : {}),
 		...(workflowRunId ? { workflowRunId } : {}),
 		...(childRuns.length ? { childRuns } : {}),
 		...(childOutputs?.length ? { childOutputs } : {}),
 		...(reconciledFromDetachedChild ? { reconciledFromDetachedChild } : {}),
-		...(watchdogBlockers.length ? { watchdogBlockers } : {}),
 		...(session ? { sessionLabel: session.label, sessionValue: session.value } : {}),
 	};
 }

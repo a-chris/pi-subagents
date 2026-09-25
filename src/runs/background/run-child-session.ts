@@ -9,15 +9,6 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { ChildTranscriptWriter } from "../../shared/child-transcript.ts";
 import { extractTextFromContent, extractToolArgsPreview, getFinalOutput, hasEmptyTerminalAssistantResponse } from "../../shared/utils.ts";
 import type { EffectsProjection, RuntimeAcknowledgedChildExtensions, SubagentOutputState, ToolBudgetState, Usage } from "../../shared/types.ts";
-import {
-	acceptChildWatchdogEvent,
-	applyChildWatchdogMessage,
-	childWatchdogIsActive,
-	isChildWatchdogStatusEvent,
-	type ChildWatchdogConfig,
-	type ChildWatchdogStateSnapshot,
-	type ChildWatchdogStatusEvent,
-} from "../../watchdog/child-status.ts";
 import { projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState } from "../shared/child-lifecycle.ts";
 import { formatSubagentModelVerificationError } from "../shared/model-resolution.ts";
 import { formatChildModelResolutionDiagnostic, isChildModelResolutionFailure } from "../shared/model-resolution-diagnostic.ts";
@@ -75,7 +66,6 @@ export interface RunChildSessionInput {
 	launch: InProcessChildLaunch;
 	/** Prompt text; the task with its `Task:` prefix. */
 	prompt: string;
-	childWatchdog?: ChildWatchdogConfig;
 	childEventContext?: ChildEventContext;
 	/** Persist one child event into `events.jsonl`; the runner owns the bounded log. */
 	appendChildEvent: (event: Record<string, unknown>) => void;
@@ -87,8 +77,6 @@ export interface RunChildSessionInput {
 	registerSteer?: (steer: StepSteerHandler | undefined) => void;
 	/** Consumption (or unconsumed settlement) after the child accepted a steer or follow-up. */
 	onSteerOutcome?: (request: SteerRequest, delivery: SteerDelivery) => void;
-	/** Receives the sink the child's watchdog hook reports status through; the launch's `watchdogStatus` must forward to it. */
-	registerWatchdogStatus?: (sink: ((event: ChildWatchdogStatusEvent) => void) | undefined) => void;
 	timeoutMessage?: string;
 	stopMessage?: string;
 	onChildEvent?: (event: ChildEvent) => void;
@@ -117,7 +105,6 @@ export interface RunChildSessionResult {
 	observedMutationAttempt?: boolean;
 	structuredOutputToolInvoked?: boolean;
 	structuredOutputMessageStartIndex?: number;
-	watchdog?: ChildWatchdogStateSnapshot;
 	sessionFile?: string;
 	currentTool?: string;
 	currentToolArgs?: string;
@@ -192,9 +179,7 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 		let afterCompactionSettlement = false;
 		let finalDrainTimer: NodeJS.Timeout | undefined;
 		let finalHardFinishTimer: NodeJS.Timeout | undefined;
-		let watchdogTailTimer: NodeJS.Timeout | undefined;
 		let abortSettleTimer: NodeJS.Timeout | undefined;
-		let childWatchdogState: ChildWatchdogStateSnapshot | undefined;
 		const childLifecycleState: ChildLifecycleState = { compactionRetryActive: false };
 		const timeoutMessage = () => input.timeoutMessage ?? "Subagent timed out.";
 		const stopMessage = () => input.stopMessage ?? "Subagent stopped by user.";
@@ -273,12 +258,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 			});
 		};
 
-		const clearWatchdogTailTimer = (): void => {
-			if (watchdogTailTimer) {
-				clearTimeout(watchdogTailTimer);
-				watchdogTailTimer = undefined;
-			}
-		};
 		const clearFinalDrainTimers = (): void => {
 			if (finalDrainTimer) {
 				clearTimeout(finalDrainTimer);
@@ -289,21 +268,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 				finalHardFinishTimer = undefined;
 			}
 		};
-		function armWatchdogTail(): void {
-			if ((!cleanTerminalAssistantStopReceived && !agentSettledReceived) || watchdogTailTimer || settled || promptSettled) return;
-			watchdogTailTimer = setTimeout(() => {
-				watchdogTailTimer = undefined;
-				childWatchdogState = {
-					phase: "stale",
-					seq: (childWatchdogState?.seq ?? 0) + 1,
-					lastUpdate: Date.now(),
-					reason: "child watchdog tail timeout",
-					timedOut: true,
-				};
-				startFinalDrain();
-			}, input.childWatchdog?.watchdogTailTimeoutMs ?? 120_000);
-			watchdogTailTimer.unref?.();
-		}
 		// If the child emits its terminal event but its run never settles (a hook
 		// is stuck), abort it after a short grace period and then finish without it.
 		const observeQueuedDrainHold = (): boolean => {
@@ -311,10 +275,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 			return queuedDrainHold;
 		};
 		function startFinalDrain(): void {
-			if (childWatchdogIsActive(childWatchdogState)) {
-				armWatchdogTail();
-				return;
-			}
 			if (promptSettled || finalDrainTimer || settled) return;
 			if (observeQueuedDrainHold()) return;
 			armFinalDrainTimer();
@@ -346,7 +306,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 				cleanTerminalAssistantStopReceived = false;
 				agentSettledReceived = false;
 				clearFinalDrainTimers();
-				clearWatchdogTailTimer();
 				return;
 			}
 			if (action === "start-drain") startFinalDrain();
@@ -426,30 +385,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 			}
 			applyChildLifecycle(lifecycleAction);
 
-			if (isChildWatchdogStatusEvent(event)) {
-				if (!input.childWatchdog) return;
-				const next = acceptChildWatchdogEvent({
-					current: childWatchdogState,
-					event,
-					...(input.childEventContext ? {
-						runId: input.childEventContext.runId,
-						agent: input.childEventContext.agent,
-						childIndex: input.childEventContext.stepIndex,
-					} : {}),
-				});
-				if (!next) return;
-				childWatchdogState = next;
-				input.onChildEvent?.(event);
-				if (childWatchdogIsActive(next)) {
-					clearFinalDrainTimers();
-					armWatchdogTail();
-				} else {
-					clearWatchdogTailTimer();
-					if (cleanTerminalAssistantStopReceived || agentSettledReceived) startFinalDrain();
-				}
-				return;
-			}
-
 			input.onChildEvent?.(event);
 
 			if (event.type === "tool_execution_end") {
@@ -495,10 +430,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 					}
 				}
 
-				if (input.childWatchdog && event.type === "message_end") {
-					const next = applyChildWatchdogMessage(childWatchdogState, event.message);
-					if (next) childWatchdogState = next;
-				}
 				if (event.type !== "message_end" || event.message.role !== "assistant") return;
 				const hasToolCall = assistantStartsToolCall(event.message);
 				if (event.message.model) {
@@ -537,7 +468,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 		/** Stops observing the child and returns when its extensions have shut down. */
 		const finish = (): Promise<void> => {
 			clearFinalDrainTimers();
-			clearWatchdogTailTimer();
 			clearAllToolTimeouts();
 			if (abortSettleTimer) {
 				clearTimeout(abortSettleTimer);
@@ -547,7 +477,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 			input.registerTimeout?.(undefined);
 			input.registerStop?.(undefined);
 			input.registerSteer?.(undefined);
-			input.registerWatchdogStatus?.(undefined);
 			unsubscribe?.();
 			return Promise.resolve().then(() => session?.dispose()).catch(() => undefined);
 		};
@@ -608,7 +537,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 					observedMutationAttempt,
 					structuredOutputToolInvoked,
 					structuredOutputMessageStartIndex,
-					watchdog: childWatchdogState,
 					sessionFile: session?.sessionFile,
 					currentTool,
 					currentToolArgs,
@@ -654,7 +582,6 @@ export function runChildSession(input: RunChildSessionInput): Promise<RunChildSe
 					return followUp(text);
 				};
 				unsubscribe = created.subscribe(processEvent);
-				input.registerWatchdogStatus?.((event) => processEvent(event as unknown as ChildSessionEvent));
 				input.registerSteer?.(async (request) => {
 					const text = formatSteerMessage(request);
 					const followUp = request.mode === "follow_up";

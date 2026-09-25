@@ -140,20 +140,12 @@ import { asyncStatusChildIdentity } from "../shared/child-identity.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
 import { effectiveToolTimeoutMs, formatToolTimeoutMessage, toolTimeoutCallKey } from "../shared/tool-timeout.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup, writeWorktreeSetupHandoff } from "../shared/parallel-handoff.ts";
-import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { acquireSessionLease, type SessionLeaseRequest } from "../shared/session-lease.ts";
 import { buildExternalCliPrompt, runExternalCli } from "../shared/external-cli-runner.ts";
 import { resolveExternalCliRunnerStatus } from "../shared/external-cli-contract.ts";
 import { runExternalJob } from "../shared/external-job-runner.ts";
 import { createOrcaProgressTab, type OrcaProgressTab } from "../shared/orca-progress-tabs.ts";
 import type { ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
-import {
-	acceptChildWatchdogEvent,
-	applyChildWatchdogMessage,
-	isChildWatchdogStatusEvent,
-	resolveChildWatchdogConfig,
-	type ChildWatchdogStatusEvent,
-} from "../../watchdog/child-status.ts";
 
 // This process hosts child sessions. An ambient copy of pi-subagents loaded
 // into one of them must register nothing; the variable marks the process as a
@@ -268,7 +260,6 @@ interface StepResult {
 	structuredOutputPath?: string;
 	structuredOutputSchemaPath?: string;
 	acceptance?: import("../../shared/types.ts").AcceptanceLedger;
-	watchdog?: import("../../shared/types.ts").ChildWatchdogProgress;
 	runner?: ExternalCliRunnerStatus | ExternalJobRunnerStatus;
 	externalProcess?: ExternalProcessStatus;
 	externalJob?: ExternalJobStatus;
@@ -1036,17 +1027,7 @@ export async function runSingleStepInner(
 				return omitUndefinedProperties({ agent: step.agent, output: cleanupError, error: cleanupError, exitCode: 1, context: step.context });
 			}
 		}
-		const watchdogConfig = resolveWatchdogConfig(step.cwd ?? ctx.cwd);
 		const extensionBindings = normalizeExtensionBindings(step.extensionBindings)?.value;
-		const childWatchdog = watchdogConfig.ok
-			? resolveChildWatchdogConfig({
-				config: watchdogConfig.config,
-				agent: step.agent,
-				runId: ctx.id,
-				childIndex: ctx.flatIndex,
-			})
-			: undefined;
-		let watchdogSink: ((event: ChildWatchdogStatusEvent) => void) | undefined;
 		let launch: ReturnType<typeof buildRunnerChildLaunch>;
 		try {
 			launch = buildRunnerChildLaunch(step, ctx, {
@@ -1055,8 +1036,6 @@ export async function runSingleStepInner(
 				model: candidate,
 				sessionName: childSessionName,
 				structuredOutput: effectiveStructuredOutput,
-				childWatchdog,
-				watchdogStatus: (event) => watchdogSink?.(event),
 			});
 		} catch (error) { throw error; }
 		if (effectiveStructuredOutput && launch.config.structuredOutput) {
@@ -1123,7 +1102,6 @@ export async function runSingleStepInner(
 			factory: ctx.childSessions,
 			launch,
 			prompt: `Task: ${recoveryTask}`,
-			childWatchdog,
 			childEventContext: { runId: ctx.id, stepIndex: ctx.flatIndex, agent: step.agent },
 			appendChildEvent: (event) => appendDiagnosticJsonl(eventsPath, JSON.stringify(event), typeof event.type === "string" ? event.type : undefined),
 			writeOutputLine: (line) => {
@@ -1139,7 +1117,6 @@ export async function runSingleStepInner(
 			registerStop: ctx.registerStop,
 			registerSteer: ctx.registerSteer,
 			onSteerOutcome: ctx.onSteerOutcome,
-			registerWatchdogStatus: (sink) => { watchdogSink = sink; },
 			timeoutMessage: ctx.timeoutMessage,
 			stopMessage: ctx.stopMessage,
 			onChildEvent: ctx.onChildEvent,
@@ -1402,7 +1379,6 @@ export async function runSingleStepInner(
 			reportOptional: isAgentContract(step.agentContract),
 			artifactsDir: ctx.artifactsDir,
 			runId: ctx.id,
-			watchdog: finalResult?.watchdog,
 		}))
 		: undefined;
 	const stoppedAfterAcceptance = finalResult?.stopped === true || ctx.stopSignal?.aborted === true;
@@ -1502,7 +1478,6 @@ export async function runSingleStepInner(
 		structuredOutputPath: timedOutAfterAcceptance || stoppedAfterAcceptance ? undefined : effectiveStructuredOutput?.outputPath,
 		structuredOutputSchemaPath: timedOutAfterAcceptance || stoppedAfterAcceptance ? undefined : effectiveStructuredOutput?.schemaPath,
 		acceptance: effectiveAcceptance,
-		watchdog: finalResult?.watchdog,
 		...(capabilityAudit ? { capabilityCeiling: capabilityAudit.ceiling, capabilityAudit } : {}),
 		launchResolvedExtensions,
 		...((finalResult as (RunChildSessionResult & { runtimeAcknowledgedExtensions?: RuntimeAcknowledgedChildExtensions }) | undefined)?.runtimeAcknowledgedExtensions ? { runtimeAcknowledgedExtensions: (finalResult as RunChildSessionResult & { runtimeAcknowledgedExtensions?: RuntimeAcknowledgedChildExtensions }).runtimeAcknowledgedExtensions } : {}),
@@ -2867,26 +2842,8 @@ export async function runSubagent(
 		const previousActivityState = step.activityState;
 		const now = Date.now();
 		statusPayload.currentStep = flatIndex;
-		if (isChildWatchdogStatusEvent(event)) {
-			const next = acceptChildWatchdogEvent({
-				current: step.watchdog,
-				event,
-				runId: id,
-				agent: step.agent,
-				childIndex: flatIndex,
-			});
-			if (!next) return;
-			step.watchdog = next;
-			step.lastActivityAt = now;
-			statusPayload.lastActivityAt = now;
-			statusPayload.lastUpdate = now;
-			writeStatusPayload(false);
-			return;
-		}
 		if (event.type === "message_end") {
-			const next = applyChildWatchdogMessage(step.watchdog, event.message);
-			if (next) step.watchdog = next;
-			if (next && (event.message as { role?: unknown } | undefined)?.role === "custom") {
+			if ((event.message as { role?: unknown } | undefined)?.role === "custom") {
 				statusPayload.lastUpdate = now;
 				writeStatusPayload(false);
 				return;
@@ -3615,7 +3572,6 @@ export async function runSubagent(
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "structuredOutputSchemaPath", singleResult.structuredOutputSchemaPath);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "acceptance", singleResult.acceptance);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "timeoutRecovery", singleResult.timeoutRecovery);
-				setOptionalProperty(requiredStatusStep(statusPayload, fi), "watchdog", singleResult.watchdog);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "capabilityCeiling", singleResult.capabilityCeiling);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "capabilityAudit", singleResult.capabilityAudit);
 				if (singleResult.capabilityCeiling) statusPayload.capabilityCeiling = singleResult.capabilityCeiling;
@@ -3674,7 +3630,6 @@ export async function runSubagent(
 					structuredOutputPath: pr.structuredOutputPath,
 					structuredOutputSchemaPath: pr.structuredOutputSchemaPath,
 					acceptance: pr.acceptance,
-					watchdog: pr.watchdog,
 					capabilityCeiling: pr.capabilityCeiling,
 					capabilityAudit: pr.capabilityAudit,
 				}));
@@ -3999,8 +3954,7 @@ export async function runSubagent(
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "structuredOutputSchemaPath", singleResult.structuredOutputSchemaPath);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "acceptance", singleResult.acceptance);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "timeoutRecovery", singleResult.timeoutRecovery);
-						setOptionalProperty(requiredStatusStep(statusPayload, fi), "watchdog", singleResult.watchdog);
-						setOptionalProperty(requiredStatusStep(statusPayload, fi), "capabilityCeiling", singleResult.capabilityCeiling);
+								setOptionalProperty(requiredStatusStep(statusPayload, fi), "capabilityCeiling", singleResult.capabilityCeiling);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "capabilityAudit", singleResult.capabilityAudit);
 						if (singleResult.capabilityCeiling) statusPayload.capabilityCeiling = singleResult.capabilityCeiling;
 						if (singleResult.capabilityAudit) statusPayload.capabilityAudit = singleResult.capabilityAudit;
@@ -4100,8 +4054,7 @@ export async function runSubagent(
 						structuredOutputPath: pr.structuredOutputPath,
 						structuredOutputSchemaPath: pr.structuredOutputSchemaPath,
 						acceptance: pr.acceptance,
-						watchdog: pr.watchdog,
-					}));
+						}));
 				}
 				for (let t = 0; t < group.parallel.length; t++) {
 					const outputName = group.parallel[t]?.outputName;
@@ -4390,7 +4343,6 @@ export async function runSubagent(
 				structuredOutputPath: singleResult.structuredOutputPath,
 				structuredOutputSchemaPath: singleResult.structuredOutputSchemaPath,
 				acceptance: singleResult.acceptance,
-				watchdog: singleResult.watchdog,
 				capabilityCeiling: singleResult.capabilityCeiling,
 				capabilityAudit: singleResult.capabilityAudit,
 				interrupted: singleResult.interrupted,
@@ -4474,7 +4426,6 @@ export async function runSubagent(
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "structuredOutputSchemaPath", singleResult.structuredOutputSchemaPath);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "acceptance", singleResult.acceptance);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "timeoutRecovery", singleResult.timeoutRecovery);
-			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "watchdog", singleResult.watchdog);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "capabilityCeiling", singleResult.capabilityCeiling);
 			setOptionalProperty(requiredStatusStep(statusPayload, flatIndex), "capabilityAudit", singleResult.capabilityAudit);
 			if (singleResult.capabilityCeiling) statusPayload.capabilityCeiling = singleResult.capabilityCeiling;
@@ -4799,7 +4750,6 @@ export async function runSubagent(
 				structuredOutputPath: r.structuredOutputPath,
 				structuredOutputSchemaPath: r.structuredOutputSchemaPath,
 				acceptance: r.acceptance,
-				watchdog: r.watchdog,
 				timeoutRecovery: r.timeoutRecovery,
 				capabilityCeiling: r.capabilityCeiling,
 				capabilityAudit: r.capabilityAudit,
