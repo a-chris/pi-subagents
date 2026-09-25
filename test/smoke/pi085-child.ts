@@ -5,8 +5,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/pi-agent-core";
 import { createModels } from "@earendil-works/pi-ai";
 
 const state = globalThis.__pi085Smoke = { AgentSession, BACKGROUND_CONTEXT, createModels, started: 0, stopped: 0, faux: undefined };
-// Exercise the runner's reachable watchdog graph, including its runtime TUI import.
-await import(pathToFileURL(`${process.env.SMOKE_EXTENSION}/src/watchdog/tool-actions.js`).href);
+// Exercise the runner's reachable graph, including its runtime TUI import.
 const { loadRunnerChildSessionFactory } = await import(pathToFileURL(`${process.env.SMOKE_EXTENSION}/src/runs/background/runner-child-sessions.js`).href);
 const factory = await loadRunnerChildSessionFactory({});
 const errors = [];

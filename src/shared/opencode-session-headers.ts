@@ -14,8 +14,8 @@ function matchesOpenCodeHost(baseUrl: string): boolean {
  * OpenCode session-routing headers for internal subagent model calls.
  *
  * Pi's own session path emits these from coding-agent's provider-attribution
- * merge, but subagent-internal calls (watchdog review, permission arbiter,
- * task-mutation arbiter, prompt audit) stream through bare Agents that bypass
+ * merge, but subagent-internal calls (task-mutation arbiter, prompt audit)
+ * stream through bare Agents that bypass
  * that path. Without them OpenCode falls back to client-IP affinity and loses
  * prompt-cache routing (see pi issue #4847). Returns undefined for every other
  * provider so non-OpenCode requests stay byte-identical.

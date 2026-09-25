@@ -140,7 +140,7 @@ async function resolveArbiterAuth(
 	};
 	// Call as a METHOD on the registry: the host ModelRegistry implementation
 	// is a class whose method reads instance state (this.runtime), so a
-	// detached call silently fails auth. Same shape as the watchdog.
+	// detached call silently fails auth. Same shape as the other internal callers.
 	if (!registry.getApiKeyAndHeaders) return {};
 	try {
 		const auth = await registry.getApiKeyAndHeaders(model);
@@ -155,7 +155,7 @@ async function resolveArbiterAuth(
 	}
 }
 
-/** Build the effective stream function with resolved credentials wrapped in (watchdog pattern). */
+/** Build the effective stream function with resolved credentials wrapped in (retry-wrap pattern). */
 function authWrappedStreamFn(
 	base: StreamFn,
 	auth: ArbiterAuth,
