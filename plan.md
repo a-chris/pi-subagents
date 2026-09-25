@@ -1,7 +1,9 @@
 # Plan: Facade rewrite of the subagent tool surface
 
-> Status: **M2 DONE (merged `6389fdc6`, cleanup `90d62cfa`) — next: M3.** VISION updated; decisions resolved.
-> Current milestone: **M3 — Subsystem removals** (3.1 lanes → 3.2 schedules → 3.3 watchdog → 3.4 missions-trim; each ≈ 1 session).
+> Status: **M3.1 Lanes DONE (merged `d8f67b7d` + synthesis `aaa11a84`) — next: M3.2.** VISION updated; decisions resolved.
+> Current milestone: **M3.2 — Schedules** (`schedule.*` actions + `at`/`every`/`timezone`/
+> `catchUp`/`overlap`/`on`/`name`, `src/runs/background/scheduled-runs.ts` engine; grep
+> `schedule.*` gone; related tests deleted). Then 3.3 watchdog, 3.4 missions-trim.
 > M1 result: three facade tools on main; rendered facade schemas 1,995 B total (was 12,449);
 > suite 2,931/2,944 at head, sole failure = pre-existing `watchdog-lsp-diagnostics` parallel-load
 > flake (passes isolated on both heads). Reviewer accepted the fixes for its two blockers.
@@ -11,6 +13,16 @@
 > parse break). Reviewer: APPROVE, no blockers. Residuals: tool-reference/extension-api docs updated
 > for context-owner change but full rewrite deferred to M6; `defaultSubagentContext` grep hit is one
 > anti-regression assert in schemas.test.ts:219 after M2.
+> M3.1 result: multi-lane orchestration removed — `runs.lanes` DSL (scripted-workflow.ts),
+> `lane` param + `lane.*` actions, merge/supersession evidence, `usageBudget`, `planId`/`laneId`,
+> reference doc; preflight lanes contract kept. Unit 2,911/2,924 (sole fail = the watchdog-lsp
+> parallel-load flake family, both :93 and the malformed-JSON sibling pass isolated); integration
+> 774/776 (sole pre-existing part-2 parse break). Reviewer verdict was REJECT on two P1s; parent
+> evidence showed P1-1 (executable `runs.lanes` tests) was a misclassification — zero executable
+> DSL tests remain, only two stale test titles (renamed); P1-2 (`progress.md` staged) + both P2s
+> (usageBudget guidance leftovers) fixed in synthesis commit `aaa11a84`.
+> Residuals: pi-lens style advisories on pre-existing baseline code (parallel-handoff
+> `validateManifestIdentity` L52-63 etc.) recorded, not fixed (option-a decision, M2 precedent).
 > Read "Vision & mindset" below first — it is the guideline set for anyone working on
 > this plan, in any session, and it is the tie-breaker for implementation issues.
 
@@ -287,12 +299,15 @@ is a safe checkpoint on its own.
 
 ## Resume checklist (next session)
 
-1. Decide the D1 flag: is the script-level `runs.lanes` API truly removed? (open thread)
-2. Read `plan.md` + VISION.md — mindset section first; check the current-milestone marker.
-3. Start **M3 — 3.1 lanes first** (remove `runs.lanes` DSL + lane params/actions + doc):
-   confirm `runs.lanes` removal with the operator if in doubt (D1 flag), then 3.2 schedules,
-   3.3 watchdog, 3.4 missions-trim. Each is an independent, narrow PR; keep one writer per
-   worktree; reviewer each before merge. Follow the session protocol.
-4. Gate each milestone on `npm run test:unit` (+ `test:integration` from M2 on; note the
-   two pre-existing baseline failures: watchdog-lsp parallel-load flake and
-   single-execution.part-2 parse break — both out of scope).
+1. Start **M3.2 — Schedules**: `schedule.*` actions, `at`/`every`/`timezone`/`catchUp`/
+   `overlap`/`on`/`name`, `src/runs/background/scheduled-runs.ts` engine; delete related tests;
+   add one CHANGELOG line. Then 3.3 watchdog, 3.4 missions-trim. Each is an independent, narrow
+   PR; keep one writer per worktree; reviewer each before merge. Follow the session protocol.
+2. Reuse the M3.1 orchestration lesson: scout map must include the subsystem's OWN test files
+   (the lanes scout missed scripted-workflow.test.ts); reviewer verdicts are evidence to verify
+   (a tool-less reviewer misread test titles as executable DSL tests — parent re-verification
+   caught it, but cheaper to give the reviewer a verified evidence pack).
+3. Gate each milestone on `npm run test:unit` (+ `test:integration`; the pre-existing baseline
+   failures: watchdog-lsp parallel-load flake family in watchdog-lsp-diagnostics.test.ts —
+   both :93 and "malformed language-server JSON" pass isolated — and single-execution.part-2
+   parse break — both out of scope).
