@@ -153,9 +153,6 @@ function validateConfig(config: Record<string, unknown>): void {
 		if (typeof config.worktreeBranchPrefix !== "string") throw new Error("config.worktreeBranchPrefix must be a string");
 		normalizeWorktreeBranchPrefix(config.worktreeBranchPrefix);
 	}
-	if (config.defaultSubagentContext !== undefined && config.defaultSubagentContext !== "fresh" && config.defaultSubagentContext !== "fork" && config.defaultSubagentContext !== "summary") {
-		throw new Error('config.defaultSubagentContext must be "fresh", "fork", or "summary"');
-	}
 	validateForkContextConfig(config.forkContext);
 	validateSummaryContextConfig(config.summaryContext);
 	if (config.checkpointBeforeDeadlineMs !== undefined

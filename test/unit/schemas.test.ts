@@ -202,21 +202,21 @@ describe("SubagentParams schema", { skip: !schemasAvailable ? "typebox not avail
 		assert.equal(CompileSchema!(collectSchema).Check({ as: "all", outputSchema: false }), false);
 	});
 
-	it("includes context field and default precedence for fresh/fork execution mode", () => {
+	it("includes context field with agent-owned precedence for fresh/fork/summary execution mode", () => {
 		const contextSchema = SubagentParams?.properties?.context;
 		assert.ok(contextSchema, "context schema should exist");
 		assert.equal(contextSchema.type, "string");
-		assert.deepEqual(contextSchema.enum, ["fresh", "fork", "summary", "profile"]);
+		assert.deepEqual(contextSchema.enum, ["fresh", "fork", "summary"]);
 		const description = String(contextSchema.description ?? "");
 		assert.match(description, /fresh/);
 		assert.match(description, /fork/);
 		assert.match(description, /summary/);
-		assert.match(description, /profile/);
-		assert.match(description, /declared defaultContext/);
-		assert.match(description, /defaultSubagentContext wins over each agent defaultContext/);
 		assert.match(description, /overrides every child/);
+		assert.match(description, /each agent's declared defaultContext/);
 		assert.match(description, /implicit fork/);
 		assert.match(description, /else fresh/);
+		assert.doesNotMatch(description, /profile/);
+		assert.doesNotMatch(description, /defaultSubagentContext/);
 	});
 
 	it("exposes named resources plus raw inline and file workflow script modes", () => {

@@ -19,6 +19,17 @@ export function wrapSummaryTask(task: string, brief: string): string {
 	return `Context brief from the parent session:\n${brief}\n\nTask:\n${task}`;
 }
 
+/**
+ * Prepend the launch prequel (state of the work) to a child task as a clearly
+ * labeled context block. Only called for launches whose resolved context mode
+ * is `fork` or `summary`; fresh launches leave the task untouched and an
+ * omitted (or empty) prequel prepends nothing.
+ */
+export function wrapPrequelTask(task: string, prequel: string | undefined): string {
+	if (prequel === undefined || prequel.trim() === "") return task;
+	return `Prequel (state of the work):\n${prequel}\n\n${task}`;
+}
+
 interface BriefSourceEntry {
 	role: "user" | "assistant";
 	texts: string[];

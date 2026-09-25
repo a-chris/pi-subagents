@@ -179,7 +179,7 @@ describe("async recovery descriptor", () => {
 		}
 	});
 
-	it("rejects unresolved profile context values", () => {
+	it("rejects invalid persisted context values", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-async-recovery-bad-context-"));
 		try {
 			fs.writeFileSync(path.join(root, "recovery-descriptor.json"), JSON.stringify({
@@ -193,7 +193,7 @@ describe("async recovery descriptor", () => {
 				inheritProjectContext: false,
 				inheritSkills: false,
 				outputMode: "inline",
-				context: "profile",
+				context: "other",
 				maxSubagentDepth: 2,
 				share: false,
 			}), "utf-8");

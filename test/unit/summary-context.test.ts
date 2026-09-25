@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { collectSessionPreview, parseBriefResponse, parseSessionEntries, wrapSummaryTask } from "../../src/shared/context-brief.ts";
+import { collectSessionPreview, parseBriefResponse, parseSessionEntries, wrapPrequelTask, wrapSummaryTask } from "../../src/shared/context-brief.ts";
 import { resolveSubagentContext, resolveSubagentLaunchContext } from "../../src/shared/fork-context.ts";
 import { contextModeLabel } from "../../src/runs/shared/context-mode.ts";
 import { discoverAgentSnapshot } from "../../src/agents/agents.ts";
@@ -133,13 +133,6 @@ describe("summary context resolution", () => {
 		assert.equal(resolveSubagentLaunchContext({
 			explicitContext: undefined,
 			agentDefaultContext: "summary",
-			defaultSubagentContext: undefined,
-			canUseImplicitFork: false,
-		}), "fresh");
-		assert.equal(resolveSubagentLaunchContext({
-			explicitContext: undefined,
-			agentDefaultContext: undefined,
-			defaultSubagentContext: "summary",
 			canUseImplicitFork: false,
 		}), "fresh");
 	});
@@ -153,24 +146,52 @@ describe("summary context resolution", () => {
 		assert.equal(resolveSubagentLaunchContext({
 			explicitContext: "fresh",
 			agentDefaultContext: "summary",
-			defaultSubagentContext: "summary",
 			canUseImplicitFork: true,
 		}), "fresh");
 	});
 
-	it("prefers config defaultSubagentContext over the agent defaultContext for summary", () => {
+	it("resolves to fresh when the launch omits context and the agent declares none", () => {
+		assert.equal(resolveSubagentLaunchContext({
+			explicitContext: undefined,
+			agentDefaultContext: undefined,
+			canUseImplicitFork: true,
+		}), "fresh");
+	});
+
+	it("uses the agent's declared defaultContext when the launch omits context", () => {
+		assert.equal(resolveSubagentLaunchContext({
+			explicitContext: undefined,
+			agentDefaultContext: "summary",
+			canUseImplicitFork: true,
+		}), "summary");
 		assert.equal(resolveSubagentLaunchContext({
 			explicitContext: undefined,
 			agentDefaultContext: "fork",
-			defaultSubagentContext: "summary",
 			canUseImplicitFork: true,
-		}), "summary");
+		}), "fork");
 	});
 
 	it("maps raw values through resolveSubagentContext with fallback-fresh", () => {
 		assert.equal(resolveSubagentContext(undefined), "fresh");
 		assert.equal(resolveSubagentContext("summary"), "summary");
 		assert.equal(resolveSubagentContext("fork"), "fork");
+	});
+});
+
+describe("wrapPrequelTask", () => {
+	it("prepends a labeled prequel block before the wrapped task", () => {
+		const wrapped = wrapPrequelTask("Task:\nImplement X.", "Decisions: A; files: src/a.ts");
+		assert.match(wrapped, /^Prequel \(state of the work\):\nDecisions: A; files: src\/a\.ts\n\nTask:\nImplement X\.$/);
+	});
+
+	it("keeps the prequel block outside the summary brief wrapper", () => {
+		const wrapped = wrapPrequelTask(wrapSummaryTask("Implement X.", "Decisions: A"), "State from the parent");
+		assert.match(wrapped, /^Prequel \(state of the work\):\nState from the parent\n\nContext brief from the parent session:\nDecisions: A\n\nTask:\nImplement X\.$/);
+	});
+
+	it("prepends nothing for an omitted or empty prequel", () => {
+		assert.equal(wrapPrequelTask("Task:\nImplement X.", undefined), "Task:\nImplement X.");
+		assert.equal(wrapPrequelTask("Task:\nImplement X.", "   "), "Task:\nImplement X.");
 	});
 });
 

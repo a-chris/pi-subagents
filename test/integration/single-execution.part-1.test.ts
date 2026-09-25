@@ -461,9 +461,9 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		assert.equal(mockPi.callCount(), 3, "wrong-then-right must not spawn");
 	});
 
-	it("resolves workflow child profile context from its agent default", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
+	it("treats legacy workflow child profile context as absent, resolving from the agent default", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		mockPi.onCall({ output: "Workflow child completed" });
-		const result = await makeExecutor([makeAgent("echo", { defaultContext: "fresh" })], { defaultSubagentContext: "fork" }).execute(
+		const result = await makeExecutor([makeAgent("echo", { defaultContext: "fresh" })]).execute(
 			"workflow-profile-context",
 			{ async: false, workflowScript: `return runs.run("main", { agent: "echo", task: "Use profile context", context: "profile" });` },
 			new AbortController().signal,

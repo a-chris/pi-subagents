@@ -209,7 +209,6 @@ function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent:
 	return resolveSubagentLaunchContext({
 		explicitContext: input.context,
 		agentDefaultContext: agent.defaultContext,
-		defaultSubagentContext: loadConfig().defaultSubagentContext,
 		canUseImplicitFork: canPreferForkFromSnapshot({
 			parentSessionFile: input.parentSessionFile,
 			leafId: input.parentLeafId,

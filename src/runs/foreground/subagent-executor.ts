@@ -194,7 +194,7 @@ import {
 	type ScheduleOrigin,
 	type SteeringTargetState,
 } from "../../shared/types.ts";
-import { generateContextBrief, wrapSummaryTask } from "../../shared/context-brief.ts";
+import { generateContextBrief, wrapPrequelTask, wrapSummaryTask } from "../../shared/context-brief.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 
 const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.rollback", "dismiss", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
@@ -366,7 +366,10 @@ export interface SubagentParamsLike {
 	worktree?: boolean;
 	/** Git ref used as the managed worktree base. */
 	baseRef?: string;
-	context?: "fresh" | "fork" | "summary" | "profile";
+	context?: "fresh" | "fork" | "summary";
+	/** Current state of the work and what led here. Consumed only when the
+	 * resolved context mode is fork|summary; fresh launches keep it absent. */
+	prequel?: string;
 	async?: boolean;
 	foregroundOnly?: boolean;
 	timeoutMs?: number;
@@ -1330,7 +1333,7 @@ async function appendStepToAsyncChain(input: {
 		childRuntime: input.deps.childRuntime,
 	});
 	const built = buildAsyncRunnerSteps(resolved.id, compactOptional<Parameters<typeof buildAsyncRunnerSteps>[1]>({
-		chain: wrapChainTasksForContext(chain, contextPolicy, (agentName: string) => summaryBriefs.get(agentName)),
+		chain: wrapChainTasksForContext(chain, contextPolicy, (agentName: string) => summaryBriefs.get(agentName), input.params.prequel),
 		task: input.params.task,
 		resultMode: "chain",
 		agents,
@@ -1838,7 +1841,7 @@ async function resumeAsyncRun(input: {
 	const unknownAgentDiagnosticContext = diagnosticContextFromDiscovery(discovered, effectiveCwd, scope);
 	const modelScope = discovered.modelScope;
 	const recoveryDescriptor = "recoveryDescriptor" in target ? target.recoveryDescriptor : undefined;
-	const recoveryContext = recoveryDescriptor?.context ?? (input.params.context === "profile" ? undefined : input.params.context);
+	const recoveryContext = recoveryDescriptor?.context ?? input.params.context;
 	const agents = discoveredAgents;
 	const discoveredAgentConfig = discoveredAgents.find((agent) => agent.name === target.agent);
 	const baseAgentConfig: AgentConfig | undefined = discoveredAgentConfig ?? (recoveryDescriptor ? {
@@ -1939,7 +1942,7 @@ async function resumeAsyncRun(input: {
 				return mode === "summary" && !summaryBriefs.has(agentName) ? "fresh" : mode;
 			},
 		};
-		const chain = wrapChainTasksForContext(attachChain, contextPolicy, (agentName: string) => summaryBriefs.get(agentName));
+		const chain = wrapChainTasksForContext(attachChain, contextPolicy, (agentName: string) => summaryBriefs.get(agentName), input.params.prequel);
 		const normalized = normalizeSkillInput(input.params.skill);
 		const parentModel = input.parentModel;
 		const result = executeAsyncChain(runId, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
@@ -2527,43 +2530,17 @@ interface AgentDefaultContextPolicy {
 	usesSummary: boolean;
 }
 
-type AgentDefaultContextPolicyResult = AgentDefaultContextPolicy | { error: string };
-
 function resolveAgentDefaultContextPolicy(
 	params: SubagentParamsLike,
 	agents: AgentConfig[],
-	defaultSubagentContext: ExtensionConfig["defaultSubagentContext"],
 	canUseDefaultFork = false,
-): AgentDefaultContextPolicyResult {
-	if (params.context === "profile") {
-		const byName = new Map(agents.map((agent) => [agent.name, agent]));
-		for (const agentName of collectRequestedAgentNames(params)) {
-			const agent = byName.get(agentName);
-			if (agent && agent.defaultContext === undefined) {
-				return { error: `context: "profile" requires agent '${agentName}' to declare defaultContext.` };
-			}
-		}
-		const contextForAgent = (agentName: string): ContextMode => {
-			const context = byName.get(agentName)?.defaultContext;
-			if (context === undefined) throw new Error(`context: "profile" requires agent '${agentName}' to declare defaultContext.`);
-			return context;
-		};
-		const contextSummary = summarizeContextModes(collectRequestedAgentNames(params).map(contextForAgent));
-		return {
-			params,
-			contextForAgent,
-			contextSummary,
-			usesFork: contextSummary === "fork" || contextSummary === "mixed",
-			usesSummary: contextSummary === "summary" || contextSummary === "mixed",
-		};
-	}
+): AgentDefaultContextPolicy {
 	if (params.context === "fresh" || params.context === "fork" || params.context === "summary") return resolveExplicitContextPolicy(params);
 	const byName = new Map(agents.map((agent) => [agent.name, agent]));
 	const contextForAgent = (agentName: string): ContextMode =>
 		resolveSubagentLaunchContext({
 			explicitContext: undefined,
 			agentDefaultContext: byName.get(agentName)?.defaultContext,
-			defaultSubagentContext,
 			canUseImplicitFork: canUseDefaultFork,
 		});
 	const requestedAgentNames = collectRequestedAgentNames(params);
@@ -2581,7 +2558,7 @@ function resolveAgentDefaultContextPolicy(
 
 function resolveExplicitContextPolicy(params: SubagentParamsLike): AgentDefaultContextPolicy {
 	const context = resolveSubagentLaunchContext({
-		explicitContext: params.context === "profile" ? undefined : params.context,
+		explicitContext: params.context,
 		canUseImplicitFork: false,
 	});
 	return {
@@ -2609,16 +2586,18 @@ function shouldSummaryAgent(contextPolicy: AgentDefaultContextPolicy, agentName:
 	return contextPolicy.contextForAgent(agentName) === "summary";
 }
 
-/** Wrap a step task for its resolved context: fork preamble, summary brief, or raw. */
+/** Wrap a step task for its resolved context: fork preamble, summary brief, or raw.
+ * The launch prequel reaches the child only when the resolved mode is fork|summary. */
 function wrapStepTaskForContext(
 	agentName: string,
 	task: string,
 	contextPolicy: AgentDefaultContextPolicy,
 	summaryBriefForTask?: (agentName: string) => string | undefined,
+	prequel?: string,
 ): string {
-	if (shouldForkAgent(contextPolicy, agentName)) return wrapForkTask(task);
+	if (shouldForkAgent(contextPolicy, agentName)) return wrapPrequelTask(wrapForkTask(task), prequel);
 	const brief = summaryBriefForTask?.(agentName);
-	return brief ? wrapSummaryTask(task, brief) : task;
+	return brief ? wrapPrequelTask(wrapSummaryTask(task, brief), prequel) : task;
 }
 
 
@@ -2633,7 +2612,7 @@ function buildRequestedModeError(params: SubagentParamsLike, message: string): A
 			isError: true,
 			details: { mode: getRequestedModeLabel(params), results: [] },
 		},
-		params.context === "profile" ? undefined : params.context,
+		params.context,
 	);
 }
 
@@ -2973,6 +2952,7 @@ function wrapChainTasksForContext(
 	chain: ChainStep[],
 	contextPolicy: AgentDefaultContextPolicy,
 	summaryBriefForTask?: (agentName: string, idx?: number) => string | undefined,
+	prequel?: string,
 ): ChainStep[] {
 	return chain.map((step, stepIndex) => {
 		if (isParallelStep(step)) {
@@ -2980,7 +2960,7 @@ function wrapChainTasksForContext(
 				...step,
 				parallel: step.parallel.map((task) => compactOptional<ParallelTaskItem>({
 					...task,
-					task: wrapStepTaskForContext(task.agent, task.task ?? "{previous}", contextPolicy, summaryBriefForTask),
+					task: wrapStepTaskForContext(task.agent, task.task ?? "{previous}", contextPolicy, summaryBriefForTask, prequel),
 				})),
 			});
 		}
@@ -2989,14 +2969,14 @@ function wrapChainTasksForContext(
 				...step,
 				parallel: compactOptional<DynamicParallelStep["parallel"]>({
 					...step.parallel,
-					task: wrapStepTaskForContext(step.parallel.agent, step.parallel.task ?? "{previous}", contextPolicy, summaryBriefForTask),
+					task: wrapStepTaskForContext(step.parallel.agent, step.parallel.task ?? "{previous}", contextPolicy, summaryBriefForTask, prequel),
 				}),
 			});
 		}
 		const sequential = step as SequentialStep;
 		return compactOptional<SequentialStep>({
 			...sequential,
-			task: wrapStepTaskForContext(sequential.agent, sequential.task ?? (stepIndex === 0 ? "{task}" : "{previous}"), contextPolicy, summaryBriefForTask),
+			task: wrapStepTaskForContext(sequential.agent, sequential.task ?? (stepIndex === 0 ? "{task}" : "{previous}"), contextPolicy, summaryBriefForTask, prequel),
 		});
 	});
 }
@@ -3273,7 +3253,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		if (launchRuleError) return toExecutionErrorResult(params, new Error(launchRuleError), data.contextPolicy.contextSummary);
 		const asyncResult = await executeAsyncSingle(id, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
-				task: wrapStepTaskForContext(params.agent!, params.task ?? "", contextPolicy, data.summaryBriefForTask),
+				task: wrapStepTaskForContext(params.agent!, params.task ?? "", contextPolicy, data.summaryBriefForTask, params.prequel),
 			goal: params.task ?? "",
 			agentConfig: a,
 			recoveryAgentConfig: data.recoveryAgents.find((agent) => agent.name === params.agent),
@@ -3797,11 +3777,13 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	}
 
 	const authoredTask = task;
+	const consumesPrequel = shouldForkAgent(contextPolicy, params.agent!) || shouldSummaryAgent(contextPolicy, params.agent!);
 	if (shouldForkAgent(contextPolicy, params.agent!)) {
 		task = wrapForkTask(task);
 	}
 	const summaryBrief = data.summaryBriefForTask?.(params.agent!, 0);
 	if (summaryBrief) task = wrapSummaryTask(task, summaryBrief);
+	if (consumesPrequel) task = wrapPrequelTask(task, params.prequel);
 	const cleanTask = task;
 	const outputPath = resolveSingleOutputPath(effectiveOutput, ctx.cwd, singleCwd, resolveSingleRunOutputBaseDir(deps, artifactsDir, runId));
 	const validationError = validateFileOnlyOutputMode(effectiveOutputMode, outputPath, `Single run (${params.agent})`);
@@ -6312,7 +6294,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 							cwd: requestCwd,
 							config: deps.config,
 							state: deps.state,
-							context: paramsWithResolvedCwd.context === "profile" ? undefined : paramsWithResolvedCwd.context,
+							context: paramsWithResolvedCwd.context,
 							requestedSessionDir: paramsWithResolvedCwd.sessionDir,
 							currentSessionFile,
 							currentSessionId,
@@ -6702,14 +6684,11 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		// Prefer fork only when the parent session is persisted and has a current leaf;
 		// otherwise use fresh immediately instead of launching a guaranteed-to-fail fork.
 		// Explicit context:"fork" remains strict.
-		const contextPolicyResult = resolveAgentDefaultContextPolicy(
+		let contextPolicy = resolveAgentDefaultContextPolicy(
 			effectiveParams,
 			discoveredAgents,
-			deps.config.defaultSubagentContext,
 			canPreferFork(ctx.sessionManager),
 		);
-		if ("error" in contextPolicyResult) return buildRequestedModeError(effectiveParams, contextPolicyResult.error);
-		let contextPolicy = contextPolicyResult;
 		effectiveParams = contextPolicy.params;
 		const agents = discoveredAgents;
 		const runId = randomUUID();

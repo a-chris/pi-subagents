@@ -2486,8 +2486,6 @@ export interface ActiveAsyncCapacityConfig {
 
 export interface ExtensionConfig {
 	asyncByDefault?: boolean;
-	/** Set the context for launches that omit an explicit context. */
-	defaultSubagentContext?: "fresh" | "fork" | "summary";
 	/** Configure how every resolved fork session is prepared before child spawn. */
 	forkContext?: ForkContextConfig;
 	/** Configure role-directed context briefs for launches resolved to `summary`. */

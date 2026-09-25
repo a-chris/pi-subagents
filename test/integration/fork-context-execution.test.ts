@@ -382,86 +382,11 @@ describe("fork context execution wiring", { skip: !available ? "subagent executo
 		assert.deepEqual(readSessionArgsFromCalls(), [path.join(tempDir, "fork-1.jsonl")]);
 	});
 
-	it("uses global defaultSubagentContext fork for a fresh-default agent", async () => {
-		const parentSessionFile = path.join(tempDir, "parent.jsonl");
-		const { manager, openedPaths, branchedLeafIds } = makeForkingSessionManagerRecorder({ sessionFile: parentSessionFile, leafId: "leaf-current" });
-		const executor = makeExecutorWithDiscoverAgents(() => ({
-			agents: [
-				{ name: "worker", description: "Worker", defaultContext: "fresh" },
-			],
-			projectAgentsDir: null,
-		}), { defaultSubagentContext: "fork" });
-
-		const result = await executor.execute(
-			"id",
-			{ agent: "worker", task: "test" },
-			new AbortController().signal,
-			undefined,
-			makeCtx(manager),
-		);
-
-		assert.equal(result.isError, undefined);
-		assert.equal(result.details?.context, "fork");
-		assert.equal(result.details?.results?.[0]?.context, "fork");
-		assert.deepEqual(openedPaths, [parentSessionFile]);
-		assert.deepEqual(branchedLeafIds, ["leaf-current"]);
-		assert.deepEqual(readSessionArgsFromCalls(), [path.join(tempDir, "fork-1.jsonl")]);
-	});
-
-	it("uses global defaultSubagentContext fresh for a fork-default agent", async () => {
-		const parentSessionFile = path.join(tempDir, "parent.jsonl");
-		const { manager, openedPaths } = makeForkingSessionManagerRecorder({ sessionFile: parentSessionFile, leafId: "leaf-current" });
-		const executor = makeExecutorWithDiscoverAgents(() => ({
-			agents: [
-				{ name: "worker", description: "Worker", defaultContext: "fork" },
-			],
-			projectAgentsDir: null,
-		}), { defaultSubagentContext: "fresh" });
-
-		const result = await executor.execute(
-			"id",
-			{ agent: "worker", task: "test" },
-			new AbortController().signal,
-			undefined,
-			makeCtx(manager),
-		);
-
-		assert.equal(result.isError, undefined);
-		assert.equal(result.details?.context, "fresh");
-		assert.equal(result.details?.results?.[0]?.context, "fresh");
-		assert.deepEqual(openedPaths, []);
-	});
-
-	it("uses profile context over global defaultSubagentContext", async () => {
-		const parentSessionFile = path.join(tempDir, "parent.jsonl");
-		const { manager, openedPaths, branchedLeafIds } = makeForkingSessionManagerRecorder({ sessionFile: parentSessionFile, leafId: "leaf-current" });
-		const executor = makeExecutorWithDiscoverAgents(() => ({
-			agents: [
-				{ name: "worker", description: "Worker", defaultContext: "fork" },
-			],
-			projectAgentsDir: null,
-		}), { defaultSubagentContext: "fresh" });
-
-		const result = await executor.execute(
-			"id",
-			{ agent: "worker", task: "test", context: "profile" },
-			new AbortController().signal,
-			undefined,
-			makeCtx(manager),
-		);
-
-		assert.equal(result.isError, undefined);
-		assert.equal(result.details?.context, "fork");
-		assert.equal(result.details?.results?.[0]?.context, "fork");
-		assert.deepEqual(openedPaths, [parentSessionFile]);
-		assert.deepEqual(branchedLeafIds, ["leaf-current"]);
-	});
-
-	it("fails profile context when the selected agent has no defaultContext", async () => {
+	it("treats legacy profile context input as absent when the agent declares no defaultContext", async () => {
 		const executor = makeExecutorWithDiscoverAgents(() => ({
 			agents: [{ name: "worker", description: "Worker" }],
 			projectAgentsDir: null,
-		}), { defaultSubagentContext: "fork" });
+		}));
 
 		const result = await executor.execute(
 			"id",
@@ -471,8 +396,75 @@ describe("fork context execution wiring", { skip: !available ? "subagent executo
 			makeCtx(makeSessionManagerRecorder().manager),
 		);
 
-		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /context: "profile" requires agent 'worker' to declare defaultContext/);
+		assert.equal(result.isError, undefined);
+		assert.equal(result.details?.context, "fresh");
+		assert.equal(result.details?.results?.[0]?.context, "fresh");
+	});
+
+	it("prepends the launch prequel to a fork-resolved agent's task", async () => {
+		const parentSessionFile = path.join(tempDir, "parent.jsonl");
+		const { manager, openedPaths, branchedLeafIds } = makeForkingSessionManagerRecorder({ sessionFile: parentSessionFile, leafId: "leaf-current" });
+		const executor = makeExecutorWithDiscoverAgents(() => ({
+			agents: [{ name: "worker", description: "Worker", defaultContext: "fork" }],
+			projectAgentsDir: null,
+		}));
+
+		const result = await executor.execute(
+			"id",
+			{ agent: "worker", task: "test", prequel: "The parent session holds three decisions and an approved plan." },
+			new AbortController().signal,
+			undefined,
+			makeCtx(manager),
+		);
+
+		assert.equal(result.isError, undefined);
+		assert.equal(result.details?.context, "fork");
+		assert.equal(result.details?.results?.[0]?.context, "fork");
+		assert.deepEqual(openedPaths, [parentSessionFile]);
+		assert.deepEqual(branchedLeafIds, ["leaf-current"]);
+		const childTask = readCallArgs().at(-1) ?? "";
+		assert.match(childTask, /^Task: Prequel \(state of the work\):\nThe parent session holds three decisions and an approved plan\./);
+		assert.match(childTask, /delegated subagent running from a fork/);
+		assert.match(childTask, /Task:\ntest$/);
+	});
+
+	it("omits the launch prequel for a fresh-resolved agent", async () => {
+		const executor = makeExecutorWithDiscoverAgents(() => ({
+			agents: [{ name: "echo", description: "Echo test agent", defaultContext: "fresh" }],
+			projectAgentsDir: null,
+		}));
+
+		const result = await executor.execute(
+			"id",
+			{ agent: "echo", task: "test", prequel: "The parent decided X." },
+			new AbortController().signal,
+			undefined,
+			makeCtx(makeSessionManagerRecorder().manager),
+		);
+
+		assert.equal(result.isError, undefined);
+		assert.equal(result.details?.context, "fresh");
+		assert.doesNotMatch(readCallArgs().at(-1) ?? "", /Prequel \(state of the work\)/);
+	});
+
+	it("omits the prequel when summary resolution falls back to fresh", async () => {
+		const { manager } = makeSessionManagerRecorder({ sessionFile: undefined, leafId: "leaf-current" });
+		const executor = makeExecutorWithDiscoverAgents(() => ({
+			agents: [{ name: "worker", description: "Worker", defaultContext: "summary" }],
+			projectAgentsDir: null,
+		}));
+
+		const result = await executor.execute(
+			"id",
+			{ agent: "worker", task: "test", prequel: "The parent decided X." },
+			new AbortController().signal,
+			undefined,
+			makeCtx(manager),
+		);
+
+		assert.equal(result.isError, undefined);
+		assert.equal(result.details?.context, "fresh");
+		assert.doesNotMatch(readCallArgs().at(-1) ?? "", /Prequel \(state of the work\)/);
 	});
 
 	it("sanitizes inherited signed thinking and keeps child thinking", async () => {

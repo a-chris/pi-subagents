@@ -159,16 +159,6 @@ Set `enabled` to `false` (or remove the block) as a kill switch. In that state, 
 
 WorkflowScript calls use background execution when the request omits `async`. Set `asyncByDefault` to `false` to restore foreground-by-default behavior for tool launches that still use the internal single-run primitive. Callers can still force foreground with `async: false` unless `forceTopLevelAsync` is enabled.
 
-## `defaultSubagentContext`
-
-```json
-{ "defaultSubagentContext": "fresh" }
-```
-
-Sets `fresh`, `fork`, or `summary` for every subagent launch that omits `context`. This global preference replaces each agent-level `defaultContext`. Explicit `context: "fresh"`, `context: "fork"`, or `context: "summary"` still wins.
-
-With `"fork"` or `"summary"`, the setting uses the existing implicit behavior: a launch starts fresh when the parent session file or current leaf is not available, and any `summary` brief-generation failure falls back to fresh with a warning. `"fresh"` starts fresh even when the selected agent defaults to fork. Scheduled runs continue to set fresh context explicitly. A runner or provider that does not support fork context keeps its existing rejection behavior.
-
 ## `summaryContext`
 
 ```json

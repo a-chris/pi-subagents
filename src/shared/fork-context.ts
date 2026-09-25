@@ -71,16 +71,18 @@ export interface PreferredForkSnapshot {
 export interface SubagentLaunchContextInput {
 	explicitContext?: SubagentExecutionContext;
 	agentDefaultContext?: SubagentExecutionContext;
-	defaultSubagentContext?: SubagentExecutionContext;
 	canUseImplicitFork: boolean;
 }
 
-/** Resolve the actual launch context from explicit, global, and agent preferences.
- * Implicit `fork` and `summary` both require a persisted parent session with a
- * current leaf; without one they fall back to `fresh`. Explicit values stay strict. */
+/** Resolve the actual launch context from explicit and agent preferences.
+ * A launch that omits `context` uses the agent's declared `defaultContext`;
+ * missing declarations fall back to `fresh` (M2: agent-owned context — the
+ * call cannot override mode). Implicit `fork` and `summary` both require a
+ * persisted parent session with a current leaf; without one they fall back to
+ * `fresh`. Explicit values stay strict. */
 export function resolveSubagentLaunchContext(input: SubagentLaunchContextInput): SubagentExecutionContext {
 	if (input.explicitContext !== undefined) return input.explicitContext;
-	const preferredContext = input.defaultSubagentContext ?? input.agentDefaultContext ?? "fresh";
+	const preferredContext = input.agentDefaultContext ?? "fresh";
 	if (preferredContext === "fork" && input.canUseImplicitFork) return "fork";
 	if (preferredContext === "summary" && input.canUseImplicitFork) return "summary";
 	return "fresh";
