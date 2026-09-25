@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { BeforeProviderRequestEvent, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { permissionDecision } from "./permissions.ts";
 import type { SteerRequest } from "../background/control-channel.ts";
 import { RUNTIME_EXTENSION_ACK_EVENT, isRuntimeAcknowledgedExtensionId } from "./runtime-acknowledged-extensions.ts";
 import { createStructuredOutputToolParameters, MISSING_STRUCTURED_ACCEPTANCE_REPORT_ERROR, validateStructuredOutputValue } from "./structured-output.ts";
@@ -12,16 +11,11 @@ import { shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge
 import type { ResolvedToolBudget, SubagentState } from "../../shared/types.ts";
 import { resolveCurrentSessionId } from "../../shared/session-identity.ts";
 import { getAgentDir } from "../../shared/utils.ts";
-import { registerChildWatchdog } from "../../watchdog/register-child.ts";
-import type { ChildWatchdogConfig } from "../../watchdog/child-status.ts";
-import { requestWatchdogPermission, type WatchdogPermissionRequest, type WatchdogPermissionResult } from "../../watchdog/permission-arbiter.ts";
-import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../watchdog/types.ts";
 import { inheritedNestedRouteOf } from "./nested-events.ts";
 import { registerWaitTool } from "../background/wait-tool.ts";
 import { drainOutstandingWork } from "../background/auto-drain.ts";
 import {
 	evaluateChildToolDiagnostic,
-	type ChildPermissions,
 	type ChildRuntimeConfig,
 } from "./child-runtime-config.ts";
 
@@ -252,7 +246,6 @@ export function rewriteSubagentPrompt(
 function isParentOnlySubagentMessage(message: RuntimeValue): boolean {
 	const m = message as { role?: string; customType?: string };
 	if (m?.role !== "custom" || typeof m.customType !== "string") return false;
-	if (m.customType === SUBAGENT_WATCHDOG_WARNING_TYPE) return true;
 	return PARENT_ONLY_CUSTOM_MESSAGE_TYPES.has(m.customType);
 }
 
@@ -365,57 +358,7 @@ export function formatSteerMessage(request: SteerRequest): string {
 	].join("\n");
 }
 
-export function registerPermissionGate(
-	pi: ExtensionAPI,
-	permissions: ChildPermissions | undefined,
-	childWatchdog: ChildWatchdogConfig | undefined,
-	requestPermission: (request: WatchdogPermissionRequest) => Promise<WatchdogPermissionResult> = requestWatchdogPermission,
-): void {
-	const rules = permissions?.rules;
-	if (!rules || Object.keys(rules).length === 0) return;
-	const rawWatchdogConfig = childWatchdog ? JSON.stringify(childWatchdog) : undefined;
-	const timeoutMs = childWatchdog?.agentEndTimeoutMs ?? 30_000;
-	// SAFETY: pi.on is a generic extension API; this wrapper narrows the handler shape to the tool_call events this child runtime consumes.
-	const onRuntimeEvent = pi.on as unknown as (event: string, handler: (event: RuntimeHookEvent, ctx: ExtensionContext) => void) => void;
-	onRuntimeEvent("tool_call", async (event, ctx) => {
-		const toolName = isString(event.toolName) ? event.toolName : "tool";
-		const decision = permissionDecision(rules, toolName);
-		if (decision === "allow") return undefined;
-		if (decision === "deny") return { block: true, reason: `Blocked by pi-subagents permission rule: '${toolName}' is denied.` };
-		if (ctx.signal?.aborted) return { block: true, reason: "Blocked by pi-subagents permission rule: Watchdog permission decision was cancelled." };
-		let timeout: ReturnType<typeof setTimeout> | undefined;
-		let abort: (() => void) | undefined;
-		let result: WatchdogPermissionResult;
-		try {
-			result = await Promise.race([
-				requestPermission({
-					ctx,
-					toolName,
-					args: event.input ?? {},
-					rawWatchdogConfig,
-					auditPath: permissions.auditPath,
-					signal: ctx.signal,
-				}),
-				new Promise<WatchdogPermissionResult>((resolve) => {
-					if (!ctx.signal) return;
-					abort = () => resolve({ approved: false, reason: "Watchdog permission decision was cancelled.", source: "watchdog" });
-					ctx.signal.addEventListener("abort", abort, { once: true });
-				}),
-				new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error(`Watchdog permission decision timed out after ${timeoutMs}ms.`)), timeoutMs); }),
-			]);
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error);
-			return { block: true, reason: `Blocked by pi-subagents permission rule: Watchdog permission arbiter failed closed: ${reason}` };
-		} finally {
-			if (timeout) clearTimeout(timeout);
-			if (abort) ctx.signal?.removeEventListener("abort", abort);
-		}
-		if (result.approved) return undefined;
-		return { block: true, reason: `Blocked by pi-subagents permission rule: ${result.reason}` };
-	});
-}
-
-function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undefined): void {
+export function registerToolBudget(pi: ExtensionAPI, budget: ResolvedToolBudget | undefined): void {
 	if (!budget) return;
 	let toolCount = 0;
 	let softNudged = false;
@@ -486,9 +429,7 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI, config?:
 	// child before startup; the inline factory remains the real registration path.
 	if (!config) return;
 	registerRuntimeExtensionAcknowledgements(pi, config.runtimeAcknowledgements);
-	registerPermissionGate(pi, config.permissions, config.childWatchdog);
 	registerToolBudget(pi, config.toolBudget);
-	registerChildWatchdog(pi, config.childWatchdog, config.watchdogStatus);
 	// SAFETY: config.runtimeState is a structurally complete SubagentState when present; the fallback literal mirrors the same shape for headless child runtimes.
 	const waitState = config.runtimeState ?? {
 		baseCwd: "",

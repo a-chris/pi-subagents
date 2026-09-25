@@ -6,7 +6,6 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ChildWatchdogConfig, ChildWatchdogStatusEvent } from "../../watchdog/child-status.ts";
 import type { ThinkingLevel } from "../../shared/model-info.ts";
 import { intersectThinkingCeilings } from "../../shared/thinking-ceiling.ts";
 import {
@@ -94,8 +93,6 @@ export interface BuildInProcessChildLaunchInput {
 	toolBudget?: ResolvedToolBudget;
 	permissionRules?: PermissionRules;
 	permissionAuditPath?: string;
-	childWatchdog?: ChildWatchdogConfig;
-	watchdogStatus?: (event: ChildWatchdogStatusEvent) => void;
 	waitToolEnabled?: boolean;
 	waitToolDefaultTimeoutMs?: number;
 	allowNestedSubagents?: boolean;
@@ -247,8 +244,6 @@ export function buildInProcessChildLaunch(input: BuildInProcessChildLaunchInput)
 		...(input.forkCacheKey?.trim() ? { forkCacheKey: input.forkCacheKey.trim() } : {}),
 		...(permissions ? { permissions } : {}),
 		...(input.toolBudget ? { toolBudget: input.toolBudget } : {}),
-		...(input.childWatchdog ? { childWatchdog: input.childWatchdog } : {}),
-		...(input.watchdogStatus ? { watchdogStatus: input.watchdogStatus } : {}),
 		waitTool: {
 			enabled: input.waitToolEnabled ?? true,
 			...(input.waitToolDefaultTimeoutMs !== undefined ? { defaultTimeoutMs: input.waitToolDefaultTimeoutMs } : {}),

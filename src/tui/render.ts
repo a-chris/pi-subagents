@@ -7,7 +7,6 @@ import { createHash } from "node:crypto";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getMarkdownTheme, keyText, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, Spacer, Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
-import { unresolvedChildWatchdogBlockers } from "../watchdog/child-status.ts";
 import {
 	type AgentProgress,
 	type AsyncJobState,
@@ -368,8 +367,6 @@ function workflowStepPriority(step: AsyncJobStep, currentNodeId?: string): numbe
 		|| step.toolBudgetBlocked === true
 		|| step.turnBudgetExceeded === true
 		|| step.activityState === "needs_attention"
-		|| step.watchdog?.phase === "stale"
-		|| unresolvedChildWatchdogBlockers(step.watchdog).length > 0
 		|| gate !== undefined
 	) return 1;
 	if (step.status === "pending") return 2;
@@ -526,8 +523,6 @@ function laneGate(step: AsyncJobStep | undefined): string | undefined {
 }
 
 function laneNextAction(state: AsyncLaneProjection["state"], step: AsyncJobStep | undefined, output: string | undefined, gate: string | undefined): string | undefined {
-	if (unresolvedChildWatchdogBlockers(step?.watchdog).length > 0) return "resolve watchdog blockers";
-	if (step?.watchdog?.phase === "stale") return "inspect stale state";
 	if (step?.toolBudgetBlocked === true || step?.turnBudgetExceeded === true) return "inspect blocked state";
 	if (gate === "review blockers") return "resolve review blockers";
 	if (gate === "review required" || gate === "acceptance review") return "review output";
@@ -564,8 +559,6 @@ export function projectAsyncLane(job: AsyncJobState, ...args: [selectedStep?: As
 		selectedStep?.structured ? "structured" : undefined,
 		selectedStep?.activityState === "active_long_running" ? "long-running" : undefined,
 		selectedStep?.activityState === "needs_attention" ? "attention" : undefined,
-		selectedStep?.watchdog?.phase === "stale" ? "stale" : undefined,
-		unresolvedChildWatchdogBlockers(selectedStep?.watchdog).length > 0 ? `wd:${unresolvedChildWatchdogBlockers(selectedStep?.watchdog).length}` : undefined,
 		selectedStep?.toolBudgetBlocked === true || selectedStep?.turnBudgetExceeded === true ? "blocked" : undefined,
 	].filter((chip): chip is string => Boolean(chip));
 	const state = isTerminalLaneState(job.status) ? job.status : selectedStep?.status ?? job.status;
@@ -1016,8 +1009,6 @@ function widgetStepRenderKey(step: AsyncJobStep, index: number, expanded = false
 		step.execution?.interrupted,
 		step.execution?.stopped,
 		step.execution?.detached,
-		step.watchdog?.phase,
-		unresolvedChildWatchdogBlockers(step.watchdog).length,
 		step.error,
 		expanded ? expandedStepActivityRenderKey(step) : undefined,
 		nestedRenderKey(step.children, expanded),
@@ -3125,7 +3116,6 @@ function foregroundWorkflowChecklist(details: Details): WorkflowChecklistProject
 			stopped: result.stopped,
 			acceptance: result.acceptance ? { status: result.acceptance.status, reviewResult: result.acceptance.reviewResult ? { status: result.acceptance.reviewResult.status } : undefined } : undefined,
 			review: result.review ? { status: result.review.status } : undefined,
-			watchdog: result.watchdog,
 		}];
 	});
 	const checklist = projectWorkflowChecklist({

@@ -31,7 +31,6 @@ export interface WorkflowChecklistStep {
 	stopped?: boolean;
 	acceptance?: { status?: string; reviewResult?: { status?: string } };
 	review?: { status?: string };
-	watchdog?: { phase?: string };
 }
 
 export interface WorkflowChecklistTraceEntry {
@@ -138,14 +137,13 @@ function count(value: unknown): number | undefined {
 	return number !== undefined && number >= 0 ? Math.round(number) : undefined;
 }
 
-function explicitBlocked(source: Pick<WorkflowChecklistStep, "activityState" | "toolBudgetBlocked" | "turnBudgetExceeded" | "timedOut" | "acceptance" | "review" | "watchdog"> & { verdict?: unknown; stale?: unknown }): boolean {
+function explicitBlocked(source: Pick<WorkflowChecklistStep, "activityState" | "toolBudgetBlocked" | "turnBudgetExceeded" | "timedOut" | "acceptance" | "review"> & { verdict?: unknown; stale?: unknown }): boolean {
 	const acceptance = normalizedStatus(source.acceptance?.status);
 	const review = normalizedStatus(source.review?.status ?? source.acceptance?.reviewResult?.status);
 	return source.toolBudgetBlocked === true
 		|| source.turnBudgetExceeded === true
 		|| source.activityState === "needs_attention"
 		|| source.timedOut === true
-		|| source.watchdog?.phase === "stale"
 		|| source.stale === true
 		|| source.verdict === "inconclusive"
 		|| acceptance === "rejected"
@@ -154,7 +152,7 @@ function explicitBlocked(source: Pick<WorkflowChecklistStep, "activityState" | "
 		|| review === "review-required";
 }
 
-function checklistState(source: Pick<WorkflowChecklistStep, "status" | "activityState" | "toolBudgetBlocked" | "turnBudgetExceeded" | "timedOut" | "acceptance" | "review" | "watchdog"> & { verdict?: unknown; stale?: unknown }): WorkflowChecklistState {
+function checklistState(source: Pick<WorkflowChecklistStep, "status" | "activityState" | "toolBudgetBlocked" | "turnBudgetExceeded" | "timedOut" | "acceptance" | "review"> & { verdict?: unknown; stale?: unknown }): WorkflowChecklistState {
 	if (explicitBlocked(source)) return "blocked";
 	switch (normalizedStatus(source.status)) {
 		case "complete":

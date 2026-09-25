@@ -91,19 +91,9 @@ import { acceptanceFailureMessage, buildSkippedAcceptanceLedger, captureStagedIn
 import { PROMPT_REDACTED } from "../../shared/utils.ts";
 import { attachContractProjections, isAgentContract } from "../shared/agent-contract.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
-import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { resolveLaunchBinding } from "../../shared/launch-contract.ts";
 import { consumeWorkflowChildPermit } from "../../shared/workflow-child-permit.ts";
 import { projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState } from "../shared/child-lifecycle.ts";
-import {
-	acceptChildWatchdogEvent,
-	applyChildWatchdogMessage,
-	childWatchdogIsActive,
-	isChildWatchdogStatusEvent,
-	resolveChildWatchdogConfig,
-	type ChildWatchdogStateSnapshot,
-	type ChildWatchdogStatusEvent,
-} from "../../watchdog/child-status.ts";
 import { buildInProcessChildLaunch, createReportedChildSessionInput } from "../shared/child-launch.ts";
 import { childSessionFactory, childSessionHasQueuedMessages, projectChildSessionEventForJson, type ChildSession, type ChildSessionEvent } from "../shared/child-session.ts";
 
@@ -363,20 +353,10 @@ async function runSingleAttempt(
 	// runtime config and echoed back on the result payload so hosts can label
 	// this run without reading the child's session file.
 	const childSessionName = deriveChildSessionName({ agent: agent.name, task: shared.originalTask ?? task });
-	const watchdogConfig = resolveWatchdogConfig(options.cwd ?? runtimeCwd);
-	const childWatchdog = watchdogConfig.ok
-		? resolveChildWatchdogConfig({
-			config: watchdogConfig.config,
-			agent: agent.name,
-			runId: options.runId,
-			childIndex: options.index ?? 0,
-		})
-		: undefined;
 	const permissionRules = resolvePermissionRules(options.permissions, agent.permissions);
 	const permissionAuditPath = permissionRules && options.artifactsDir
 		? path.join(options.artifactsDir, "permission-audit", `${options.runId}-${options.index ?? 0}.jsonl`)
 		: undefined;
-	let onWatchdogStatus: ((event: ChildWatchdogStatusEvent) => void) | undefined;
 	const launch = buildInProcessChildLaunch({
 		extensionBindings: options.extensionBindings,
 		requiredExtensions: options.requiredExtensions,
@@ -411,9 +391,6 @@ async function runSingleAttempt(
 		toolBudget: options.toolBudget,
 		permissionRules,
 		permissionAuditPath,
-		childWatchdog,
-		// registerChildWatchdog returns before reading the sink when no watchdog exists.
-		watchdogStatus: childWatchdog ? (event) => onWatchdogStatus?.(event) : undefined,
 		waitToolEnabled: options.waitToolEnabled,
 		waitToolDefaultTimeoutMs: options.waitToolDefaultTimeoutMs,
 		capabilityCeiling: options.capabilityCeiling,
@@ -652,19 +629,6 @@ async function runSingleAttempt(
 		let compactionStartedReceived = false;
 		let finalDrainTimer: NodeJS.Timeout | undefined;
 		let finalHardFinishTimer: NodeJS.Timeout | undefined;
-		let watchdogTailTimer: NodeJS.Timeout | undefined;
-		let childWatchdogState: ChildWatchdogStateSnapshot | undefined;
-		const updateChildWatchdogState = (snapshot: ChildWatchdogStateSnapshot): void => {
-			childWatchdogState = snapshot;
-			result.watchdog = snapshot;
-			progress.watchdog = snapshot;
-		};
-		const clearWatchdogTailTimer = () => {
-			if (watchdogTailTimer) {
-				clearTimeout(watchdogTailTimer);
-				watchdogTailTimer = undefined;
-			}
-		};
 		const clearFinalDrainTimers = () => {
 			if (finalDrainTimer) {
 				clearTimeout(finalDrainTimer);
@@ -680,10 +644,6 @@ async function runSingleAttempt(
 			return queuedDrainHold;
 		};
 		const startFinalDrain = () => {
-			if (childWatchdogIsActive(childWatchdogState)) {
-				armWatchdogTail();
-				return;
-			}
 			if (sessionSettled || finalDrainTimer || lifecycleFinished) return;
 			if (observeQueuedDrainHold()) return;
 			armFinalDrainTimer();
@@ -710,28 +670,11 @@ async function runSingleAttempt(
 			}, FINAL_STOP_GRACE_MS);
 			finalDrainTimer.unref?.();
 		};
-		function armWatchdogTail(): void {
-			if ((!cleanTerminalAssistantStopReceived && !agentSettledReceived) || watchdogTailTimer || lifecycleFinished || sessionSettled) return;
-			watchdogTailTimer = setTimeout(() => {
-				watchdogTailTimer = undefined;
-				updateChildWatchdogState({
-					phase: "stale",
-					seq: (childWatchdogState?.seq ?? 0) + 1,
-					lastUpdate: Date.now(),
-					reason: "child watchdog tail timeout",
-					timedOut: true,
-				});
-				startFinalDrain();
-				fireUpdate();
-			}, childWatchdog?.watchdogTailTimeoutMs ?? 120_000);
-			watchdogTailTimer.unref?.();
-		}
 		const applyChildLifecycle = (action: ChildLifecycleAction): void => {
 			if (action === "cancel-drain") {
 				cleanTerminalAssistantStopReceived = false;
 				agentSettledReceived = false;
 				clearFinalDrainTimers();
-				clearWatchdogTailTimer();
 				return;
 			}
 			if (action === "start-drain") startFinalDrain();
@@ -742,7 +685,6 @@ async function runSingleAttempt(
 			if (lifecycleFinished) return;
 			lifecycleFinished = true;
 			clearFinalDrainTimers();
-			clearWatchdogTailTimer();
 			clearTimeoutTimers();
 			clearAllToolTimeouts();
 			if (activityTimer) {
@@ -752,7 +694,6 @@ async function runSingleAttempt(
 			removeAbortListener?.();
 			removeInterruptListener?.();
 			unsubscribe?.();
-			onWatchdogStatus = undefined;
 			void jsonlWriter.close().catch(() => {
 				// JSONL artifact flush is best effort.
 			});
@@ -986,28 +927,6 @@ async function runSingleAttempt(
 			}
 			applyChildLifecycle(lifecycleAction);
 
-			if (isChildWatchdogStatusEvent(evt)) {
-				if (!childWatchdog) return;
-				const next = acceptChildWatchdogEvent({
-					current: childWatchdogState,
-					event: evt,
-					runId: options.runId,
-					agent: agent.name,
-					childIndex: options.index ?? 0,
-				});
-				if (!next) return;
-				updateChildWatchdogState(next);
-				if (childWatchdogIsActive(next)) {
-					clearFinalDrainTimers();
-					armWatchdogTail();
-				} else {
-					clearWatchdogTailTimer();
-					if (cleanTerminalAssistantStopReceived || agentSettledReceived) startFinalDrain();
-				}
-				fireUpdate();
-				return;
-			}
-
 			const now = Date.now();
 			progress.durationMs = now - startTime;
 			progress.lastActivityAt = now;
@@ -1049,10 +968,6 @@ async function runSingleAttempt(
 
 			if (evt.type === "message_end" && evt.message) {
 				result.messages!.push(evt.message);
-				if (childWatchdog) {
-					const next = applyChildWatchdogMessage(childWatchdogState, evt.message);
-					if (next) updateChildWatchdogState(next);
-				}
 				if (evt.message.role === "assistant") {
 					result.usage.turns++;
 					progress.turnCount = result.usage.turns;
@@ -1152,7 +1067,6 @@ async function runSingleAttempt(
 				fireUpdate();
 			}
 		};
-		onWatchdogStatus = (event) => processEvent(event as unknown as Parameters<typeof processEvent>[0]);
 
 		fireUpdate();
 		if (controlConfig.enabled || options.onUpdate) {
@@ -2009,7 +1923,6 @@ async function runSyncCompletionInner(
 				reportOptional: isAgentContract(options.agentContract),
 				artifactsDir: options.artifactsDir,
 				runId: options.runId,
-				watchdog: result.watchdog,
 			});
 		}
 	} catch (error) {

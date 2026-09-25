@@ -25,10 +25,6 @@ import { buildDoctorReport } from "../../extension/doctor.ts";
 import { readSubagentGuide } from "../../extension/subagent-guide.ts";
 import { normalizePublicSubagentExecution, validateWorkflowCapacityOverrides } from "../../extension/public-execution.ts";
 import { runSync } from "./execution.ts";
-import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/tool-actions.ts";
-import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
-import { applyWatchdogLaunchRules } from "../../watchdog/rules.ts";
-import { childWatchdogProgressForModel } from "../../watchdog/child-status.ts";
 import { normalizeParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
 import { getHostBuiltinToolNames } from "../shared/child-tool-plan.ts";
 import { projectChainOutputSchemas, resolveEffectiveOutputSchema } from "../shared/child-launch-plan.ts";
@@ -189,7 +185,7 @@ import {
 import { generateContextBrief, wrapPrequelTask, wrapSummaryTask } from "../../shared/context-brief.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 
-const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "refine", "refine.rollback", "dismiss"]);
+const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "refine", "refine.rollback", "dismiss"]);
 const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["delete", "eject", "disable", "reset", "mission.close", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt"]);
 
 function resolveSteerDeliveryMode(mode: SubagentParamsLike["mode"]): SteerDeliveryMode | undefined {
@@ -421,7 +417,6 @@ interface ExecutorDeps {
 	asyncByDefault: boolean;
 	waitToolEnabled?: boolean;
 	waitToolDefaultTimeoutMs?: number;
-	watchdog?: MainWatchdogRuntime;
 	tempArtifactsDir: string;
 	getSubagentSessionRoot: (parentSessionFile: string | null) => string;
 	expandTilde: (p: string) => string;
@@ -2790,13 +2785,11 @@ function withResolvedContext(
 }
 
 function withAggregatedToolUsage(result: AgentToolResult<Details>): AgentToolResult<Details> {
-	const highWarnings = result.details.results.flatMap((child) => child.watchdog?.warnings?.filter((warning) => warning.importance === "high") ?? []);
 	const projected: AgentToolResult<Details> = {
 		...result,
-		...(highWarnings.length ? { content: [...result.content, { type: "text", text: ["High-importance watchdog findings:", ...highWarnings.map((warning) => `- ${warning.severity}: ${warning.summary}\n  Evidence: ${warning.evidence}\n  Recommended action: ${warning.recommendedAction}`)].join("\n") }] } : {}),
 		details: {
 			...result.details,
-			results: result.details.results.map((child) => ({ ...child, ...(child.watchdog ? { watchdog: childWatchdogProgressForModel(child.watchdog) } : {}) })),
+			results: result.details.results,
 		},
 	};
 	if (projected.details.results.length === 0) return projected;
@@ -3220,8 +3213,6 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 				source: modelOrigin === "explicit" ? "explicit" : "inherited",
 			});
 		const modelOverrideFromParent = modelOrigin === "inherited";
-		const launchRuleError = applyWatchdogLaunchRules({ cwd: effectiveCwd, agent: a.name, model: modelOverride ?? (parentModel && `${parentModel.provider}/${parentModel.id}`), warn: (violation) => deps.watchdog?.displayRuleWarning(violation) });
-		if (launchRuleError) return toExecutionErrorResult(params, new Error(launchRuleError), data.contextPolicy.contextSummary);
 		const asyncResult = await executeAsyncSingle(id, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
 				task: wrapStepTaskForContext(params.agent!, params.task ?? "", contextPolicy, data.summaryBriefForTask, params.prequel),
@@ -3664,8 +3655,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		},
 	);
 	const modelOverrideFromParent = modelOrigin === "inherited";
-	const launchRuleError = applyWatchdogLaunchRules({ cwd: effectiveCwd, agent: agentConfig.name, model: modelOverride ?? (parentModel && `${parentModel.provider}/${parentModel.id}`), warn: (violation) => deps.watchdog?.displayRuleWarning(violation) });
-	if (launchRuleError) return toExecutionErrorResult(params, new Error(launchRuleError), data.contextPolicy.contextSummary);
 	let skillOverride: string[] | false | undefined = normalizeSkillInput(params.skill);
 	let readsOverride: string[] | false | undefined = params.reads;
 	const rawOutput = params.output !== undefined ? params.output : agentConfig.output;
@@ -5919,16 +5908,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					...(deps.config.missions ? { config: deps.config.missions } : {}),
 					...(currentSessionId ? { currentSessionId } : {}),
 				});
-			}
-			if ((WATCHDOG_TOOL_ACTIONS as readonly string[]).includes(action)) {
-				if (deps.allowMutatingManagementActions === false && MUTATING_MANAGEMENT_ACTIONS.has(action)) {
-					return {
-						content: [{ type: "text", text: `Action '${action}' is not available from child-safe subagent fanout mode.` }],
-						isError: true,
-						details: { mode: "management" as const, results: [] },
-					};
-				}
-				return handleWatchdogToolAction(action, paramsWithResolvedCwd, ctx, deps.watchdog);
 			}
 			if (action === "refine" || action === "refine.show" || action === "refine.rollback") {
 				if (deps.allowMutatingManagementActions === false && MUTATING_MANAGEMENT_ACTIONS.has(action)) {

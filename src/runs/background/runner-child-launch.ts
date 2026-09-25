@@ -25,8 +25,6 @@ export function buildRunnerChildLaunch(step: RunnerSubagentStep, ctx: RunnerChil
 	sessionDir?: string;
 	sessionName?: string;
 	structuredOutput?: BuildInProcessChildLaunchInput["structuredOutput"];
-	childWatchdog?: BuildInProcessChildLaunchInput["childWatchdog"];
-	watchdogStatus: NonNullable<BuildInProcessChildLaunchInput["watchdogStatus"]>;
 }) {
 	// Resource-backed system instructions survive SDK split-turn compaction verbatim.
 	const acceptancePrompt = step.effectiveAcceptance
@@ -70,9 +68,6 @@ export function buildRunnerChildLaunch(step: RunnerSubagentStep, ctx: RunnerChil
 		permissionRules: step.permissionRules,
 		permissionAuditPath: step.permissionRules && ctx.artifactsDir
 			? path.join(ctx.artifactsDir, "permission-audit", `${ctx.id}-${ctx.flatIndex}.jsonl`) : undefined,
-		childWatchdog: attempt.childWatchdog,
-		// registerChildWatchdog returns before reading the sink when unconfigured.
-		...(attempt.childWatchdog ? { watchdogStatus: attempt.watchdogStatus } : {}),
 		waitToolEnabled: step.waitToolEnabled,
 		waitToolDefaultTimeoutMs: step.waitToolDefaultTimeoutMs,
 		thinkingCeiling: step.thinkingCeiling,
