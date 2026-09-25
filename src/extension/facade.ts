@@ -55,9 +55,9 @@ export type FacadeExecutePublic = (
 ) => Promise<AgentToolResult<Details>>;
 
 export function normalizeDelegationParams(params: SubagentDelegationFacadeParams): SubagentParamsLike {
-	// SAFETY: prequel is not yet a member of the internal SubagentParamsLike
-	// contract (M2 wires it). The executor ignores unknown keys, so forwarding
-	// it is safe and keeps the facade param available to M2 unchanged.
+	// prequel is a member of the internal SubagentParamsLike contract as of M2
+	// (subagent-executor.ts); the executor consumes it for fork|summary-fresolved
+	// launches and ignores it otherwise.
 	return {
 		task: params.task,
 		agent: params.agent,
