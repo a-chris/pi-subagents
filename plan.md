@@ -1,6 +1,6 @@
 # Plan: Facade rewrite of the subagent tool surface
 
-> Status: **M3.2 Schedules DONE (committed `ff8d0166`) — next: M3.3.** VISION updated; decisions resolved.
+> Status: **M3.2 Schedules DONE (committed `52f65f9e` + synthesis commit) — next: M3.3.** VISION updated; decisions resolved.
 > Current milestone: **M3.3 — Watchdog** (`watchdog.*` actions, `scope`/`target`/`focus`/`thinking`,
 > `src/watchdog/runtime.ts` + watchdog config validators + `docs/watchdog.md`). Then 3.4 missions-trim.
 > M1 result: three facade tools on main; rendered facade schemas 1,995 B total (was 12,449);
