@@ -36,6 +36,16 @@ If that path exists and costs the operator one ordinary action, the request is a
 A second path to the same outcome is only justified when the existing one loses work, cannot express the need, or is unavailable where the need occurs.
 Convenience alone is not enough; every parallel path adds docs, status text, tests, and a new way for behavior to disagree with configuration.
 
+## The model-facing surface is a facade
+
+The model sees a small, deliberate surface: a few tools, each with a handful of parameters it is the sole source of truth for. Everything else is declared by agents or configured once and enriched in TypeScript at execution.
+
+Modes live in separate tools so a call that mixes them is unrepresentable, not merely rejected. The system does not expect the model to memorize rules the schema shape can make impossible.
+
+Policy rides with the agent, not the call: context mode, recurring reads, skills, and model preferences are declared on the agent definition and cannot be overridden per call. A task carries the action to take; context about the current state of the work is a separate field a child consumes only when its declared mode needs it.
+
+Sessions may run small local models. The surface, descriptions, and schemas are written for a weak model: simple shapes, enums where a closed set exists, short descriptions, and live discovery injected at load time.
+
 ## Compatibility is explicit
 
 Default to hard cutovers when replacing a tool, option, behavior, or public surface.
@@ -61,7 +71,7 @@ Each PR should prove one clear invariant and stop before it turns into a framewo
 
 Delegation must stay fast enough that one parent session can keep several children moving without the operator waiting on the tool.
 Status, progress, watchers, TUI refresh, filesystem scans, and orchestration setup are hot paths.
-Token cost is part of the same constraint: extra context, extra children, and extra layers have to earn their keep.
+Token cost is part of the same constraint: extra context, extra children, and extra layers have to earn their keep. The model-facing tool surface is part of that budget: every parameter and every word of description in a schema is context paid on every session that loads it.
 A change that makes those paths slower needs proof or explicit owner approval.
 Unmeasured risk in a hot path is a reason to refuse the change.
 
@@ -86,6 +96,10 @@ It does not add integrations for niche tools without clear demand.
 It does not add a second path to an outcome the operator can already reach with one ordinary action.
 It does not treat external agents as native Pi children before their capabilities are proven.
 It does not run background reviewers on every edit by default; delegation happens because the operator asked for it, directly or through their instructions.
+It does not expect the model to memorize rules the schema shape can make impossible.
+It does not expose parameters whose value the agent or configuration already owns.
+It does not let the model rewrite its own agent registry; agents are operator-owned artifacts.
+It does not keep machinery that mirrors an existing path outside the extension — OS scheduling, configuration, or a composed workflow — when that path produces the same outcome.
 It does not accept a slower status loop, watcher, or common workflow just to make the machinery look richer.
 
 ## How to judge a change
@@ -94,5 +108,6 @@ A change fits when it gives one operator more leverage with the same or better c
 A change fits when it composes from existing primitives or honestly shows why it cannot.
 A change fits when no existing path already gives the operator the same outcome, or it shows why that path fails.
 A change fits when it keeps or improves speed and token cost, or proves why a cost is worth paying.
+A change fits when it narrows the model-facing surface, moves policy into agent or configuration declarations, and makes a wrong call unrepresentable by shape rather than rejected by rules.
 A change does not fit when it adds hot-path cost without proof, hides running work, accepts confidence in place of evidence, widens authority beyond the operator's instructions, or grows scope toward general project management.
 When a proposal is in doubt, ask whether it makes delegation more trustworthy for the person whose name it runs under.
