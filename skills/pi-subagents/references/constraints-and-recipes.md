@@ -45,7 +45,7 @@ This reference keeps cross-cutting policy and failure handling. Load the matchin
 
 | Need | Read |
 | --- | --- |
-| Execution syntax, lifecycle, async/wait, missions, controls, watchdog, or worktrees | [`references/execution-controls.md`](execution-controls.md) |
+| Execution syntax, lifecycle, async/wait, missions, controls, or worktrees | [`references/execution-controls.md`](execution-controls.md) |
 | Role choice, prompt contracts, review/research/cleanup techniques, or model tiering | [`references/prompting-and-roles.md`](prompting-and-roles.md) |
 | Fresh review, validation, gate failures, finding disposition, and final delivery checks | [`references/review-and-validation.md`](review-and-validation.md) |
 | Agent management, file authoring, prompt integration, or RPC | [`references/management-authoring-rpc.md`](management-authoring-rpc.md) |

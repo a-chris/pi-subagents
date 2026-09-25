@@ -2,7 +2,7 @@
 
 Parameters and actions for the `subagent` tool. These are what the LLM passes when it calls the tool; most users ask naturally or use slash commands instead.
 
-Call `{ action: "guide", topic: "tool-reference" }` for this reference or `topic: "workflows"` for [workflow recipes](workflows.md). Use `topic: "agents"` for authoring, `topic: "missions"` for missions, and `topic: "watchdog"` for watchdog controls. Guide reads do not change the schema or grant authority.
+Call `{ action: "guide", topic: "tool-reference" }` for this reference or `topic: "workflows"` for [workflow recipes](workflows.md). Use `topic: "agents"` for authoring and `topic: "missions"` for missions. Guide reads do not change the schema or grant authority.
 
 ## Execution examples
 
@@ -54,11 +54,11 @@ The host resolves the script and authority internally and records bounded proven
 |-------|------|---------|-------------|
 | `agent` | string | - | One direct child or agent-management target. Workflow child agents are set inside `runs.run` or `runs.all`. |
 | `task` | string | agent default | Direct child's task; requires `agent`, excludes `action` and workflow inputs. `agent` may also select a management target. |
-| `action` | string | - | Offline workflow `validate`, agent management (including `guide`, `children.list`, and `refine`/`refine.show`/`refine.rollback`), mission (`mission.create/list/show/update/resolve-decision/attach-run/close`), Inspect actions (`inspector.command/open/status/close`), status/control, plan-only `worktree.cleanup`, watchdog, or doctor action. |
-| `topic` | `overview \| workflows \| agents \| missions \| observability \| tool-reference \| configuration \| models \| watchdog \| extension-api` | `overview` | Packaged guide topic for `action: "guide"`. |
+| `action` | string | - | Offline workflow `validate`, agent management (including `guide`, `children.list`, and `refine`/`refine.show`/`refine.rollback`), mission (`mission.create/list/show/update/resolve-decision/attach-run/close`), Inspect actions (`inspector.command/open/status/close`), status/control, plan-only `worktree.cleanup`, or doctor action. |
+| `topic` | `overview \| workflows \| agents \| missions \| observability \| tool-reference \| configuration \| models \| extension-api` | `overview` | Packaged guide topic for `action: "guide"`. |
 | `config` | object/string | - | Agent config for management create/update. |
 | `context` | `fresh \| fork \| summary` | per-agent `defaultContext`, else `fresh` | Explicit `fresh`, `fork`, or `summary` overrides every workflow child. When omitted, each agent's declared `defaultContext` resolves per child, else `fresh`; implicit fork/summary fall back to fresh without a persisted parent session and leaf. Explicit fork is strict. `summary` distills the parent session into a role-directed brief (see [`contextBrief`](agents.md)) prepended to the child task; generation failures fall back to fresh. Packaged `worker` and `reviewer` default to `summary`; `oracle` defaults to `fork`; the rest default to `fresh`. |
-| `model` | string | agent default | Call `{action:"models"}` first and copy an exact `provider/id`; bare ids resolve only if unique, and agent names are not model ids. A suffix such as `provider/id:high` (`off/minimal/low/medium/high/xhigh/max`) overrides agent thinking. The `thinking` field is only for `watchdog.configure`, ignored on dispatch. |
+| `model` | string | agent default | Call `{action:"models"}` first and copy an exact `provider/id`; bare ids resolve only if unique, and agent names are not model ids. A suffix such as `provider/id:high` (`off/minimal/low/medium/high/xhigh/max`) overrides agent thinking. |
 | `missionId` | string | - | Attach a workflow to an existing project mission instead of creating its default enclosing mission. |
 | `mission` | object/false | auto-create | Override the default enclosing mission with `{ title \| summary, objective?, goal?, budget?, labels? }`. Set exactly one non-empty `title` or `summary`; `objective` and `labels` are optional. `goal` may only be `true`, requires `budget.tokens`, and enables continuation notices. Pass `false` for an intentionally ephemeral workflow with no mission for it or its children and no `state` global. Explicit mission persistence failures are strict. |
 | `handoffPath` | string | - | Aggregate handoff manifest for `action: "worktree.discard"`, or explicit metadata for `action: "worktree.cleanup"`. |
@@ -160,7 +160,7 @@ For a simple implementation challenge outside a workflow script, send the challe
 
 ### Guide
 
-`{ action: "guide" }` reads the packaged `README.md` from the installed version. Pass `topic` to read its packaged `docs/<topic>.md` file instead. Valid topics are `overview`, `workflows`, `agents`, `missions`, `observability`, `tool-reference`, `configuration`, `models`, `watchdog`, and `extension-api`. Unknown topics list the valid values and do not change files. Use `/subagents-guide [topic]` for the slash equivalent.
+`{ action: "guide" }` reads the packaged `README.md` from the installed version. Pass `topic` to read its packaged `docs/<topic>.md` file instead. Valid topics are `overview`, `workflows`, `agents`, `missions`, `observability`, `tool-reference`, `configuration`, `models`, and `extension-api`. Unknown topics list the valid values and do not change files. Use `/subagents-guide [topic]` for the slash equivalent.
 
 Agent definitions are not loaded into context by default. Management actions let the LLM discover, inspect, create, update, and delete agents at runtime. An unknown action returns safe next steps (`status` and `list`) and may suggest a close non-destructive action. Destructive actions are only named for a near-complete one-character typo, and suggestions never execute an action.
 

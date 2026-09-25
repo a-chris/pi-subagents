@@ -79,7 +79,7 @@ For exact API fields and worked examples, call `subagent({action:"guide",topic:"
 | Branch | Read |
 | --- | --- |
 | Delegate or choose roles, prompts, models, or slash commands | `references/prompting-and-roles.md` |
-| Execute single, scripted, async, mission, forked, watchdog, oracle, or blocked-reporting workflows | `references/execution-controls.md` |
+| Execute single, scripted, async, mission, forked, oracle, or blocked-reporting workflows | `references/execution-controls.md` |
 | Review, validate, triage gate failures, or prepare delivery | `references/review-and-validation.md` |
 | List, create, edit, disable, eject, or expose agents/RPC | `references/management-authoring-rpc.md` |
 | Check safety constraints, recipes, or error handling | `references/constraints-and-recipes.md` |
