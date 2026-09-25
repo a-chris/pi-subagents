@@ -1,10 +1,16 @@
 # Plan: Facade rewrite of the subagent tool surface
 
-> Status: **M1 DONE (merged `95073427`) — next: M2.** VISION updated; decisions resolved.
-> Current milestone: **M2 — Context → agent-owned + `prequel`** (start on operator go).
+> Status: **M2 DONE (merged `6389fdc6`, cleanup `90d62cfa`) — next: M3.** VISION updated; decisions resolved.
+> Current milestone: **M3 — Subsystem removals** (3.1 lanes → 3.2 schedules → 3.3 watchdog → 3.4 missions-trim; each ≈ 1 session).
 > M1 result: three facade tools on main; rendered facade schemas 1,995 B total (was 12,449);
 > suite 2,931/2,944 at head, sole failure = pre-existing `watchdog-lsp-diagnostics` parallel-load
 > flake (passes isolated on both heads). Reviewer accepted the fixes for its two blockers.
+> M2 result: agent-owned `defaultContext` (missing → fresh), `config.defaultSubagentContext` removed,
+> `profile` removed, `prequel` wired (outermost labeled block for fork|summary, absent for fresh).
+> Unit 2,942/2,942 green at head; integration 779/781 (sole pre-existing `single-execution.part-2`
+> parse break). Reviewer: APPROVE, no blockers. Residuals: tool-reference/extension-api docs updated
+> for context-owner change but full rewrite deferred to M6; `defaultSubagentContext` grep hit is one
+> anti-regression assert in schemas.test.ts:219 after M2.
 > Read "Vision & mindset" below first — it is the guideline set for anyone working on
 > this plan, in any session, and it is the tie-breaker for implementation issues.
 
@@ -250,7 +256,10 @@ is a safe checkpoint on its own.
    where to start. Nothing else from the plan is in scope this session.
 2. **During:** stay inside the milestone's Files / Verify / Done-when. If a milestone grows
    beyond the session, **stop at the last green checkpoint**, split it, and update the plan.
-3. **End:** suite green; measurement recorded when applicable; plan.md status + current-milestone
+3. **Commit hygiene:** in worktrees that link `node_modules` (validation symlink), commit
+   **explicit file lists only — never `git add -A`** (the link gets swept into the branch;
+   M2's merge carried it and needed a corrective revert).
+4. **End:** suite green; measurement recorded when applicable; plan.md status + current-milestone
    updated; committed. A milestone is never "mostly done" — it is done (done-when met) or not.
 
 ## Resolved decisions (owner, 2026-09)
@@ -280,7 +289,10 @@ is a safe checkpoint on its own.
 
 1. Decide the D1 flag: is the script-level `runs.lanes` API truly removed? (open thread)
 2. Read `plan.md` + VISION.md — mindset section first; check the current-milestone marker.
-3. Start **M2** (context → agent-owned + `prequel`): rewire `resolveSubagentContext`,
-   delete `config.defaultSubagentContext`, wire `prequel` consumption, agent frontmatter
-   `defaultContext`/`contextBrief`, docs. Follow the session protocol.
-4. Gate each milestone on `npm run test:unit` (+ `test:integration` from M2 on).
+3. Start **M3 — 3.1 lanes first** (remove `runs.lanes` DSL + lane params/actions + doc):
+   confirm `runs.lanes` removal with the operator if in doubt (D1 flag), then 3.2 schedules,
+   3.3 watchdog, 3.4 missions-trim. Each is an independent, narrow PR; keep one writer per
+   worktree; reviewer each before merge. Follow the session protocol.
+4. Gate each milestone on `npm run test:unit` (+ `test:integration` from M2 on; note the
+   two pre-existing baseline failures: watchdog-lsp parallel-load flake and
+   single-execution.part-2 parse break — both out of scope).
