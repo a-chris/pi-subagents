@@ -1,8 +1,18 @@
 # Plan: Facade rewrite of the subagent tool surface
 
-> Status: **M3.2 Schedules DONE (committed `52f65f9e` + synthesis commit) — next: M3.3.** VISION updated; decisions resolved.
-> Current milestone: **M3.3 — Watchdog** (`watchdog.*` actions, `scope`/`target`/`focus`/`thinking`,
-> `src/watchdog/runtime.ts` + watchdog config validators + `docs/watchdog.md`). Then 3.4 missions-trim.
+> Status: **M3.3a Watchdog CORE DONE (merged `f26886b3`, 6 unit commits) — next: M3.3b (integration).**
+> VISION updated; decisions resolved.
+> Current milestone: **M3.3b — Watchdog integration cleanup** (7 integration files: undo the
+> watchdog fixtures/describes in async-execution.part-4 [5 its], slash-commands [watchdog describe], render-widget [fixture], async-status, model-resolution-diagnostic [stub], single-execution.part-2 [double watchdog blocks], external-cli-runner [title], plus the two fixture-import breaks). Then 3.4 missions-trim.
+> M3.3a split per the scout's session-size verdict; implemented directly by the parent
+> (operator: "implement the milestone yourself" after the delegation lane lost its tool
+> registration). Result: src watchdog-free (typecheck 0), unit 2,719/2,719 — the two
+> watchdog-lsp parallel-load flake baselines are GONE (watchdog-lsp-diagnostics.test.ts
+> deleted with the subsystem); the integrated 7-test files are documented known-red for 3.3b.
+> Parent rulings: `focus` param stays (inspector-owned; M4 sweep), `thinking` param removed
+> now (watchdog-only), the 3 comment rewords applied; VISION refusal lines untouched.
+> M3.3a commits: U1 deletions → U2 types/schemas/index → U3a foreground → U3b background →
+> U4 unit tests → U5 docs/CHANGELOG. Net diff: 76 files, +40/−9,379.
 > M1 result: three facade tools on main; rendered facade schemas 1,995 B total (was 12,449);
 > suite 2,931/2,944 at head, sole failure = pre-existing `watchdog-lsp-diagnostics` parallel-load
 > flake (passes isolated on both heads). Reviewer accepted the fixes for its two blockers.
