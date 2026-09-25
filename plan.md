@@ -1,7 +1,10 @@
 # Plan: Facade rewrite of the subagent tool surface
 
-> Status: **VISION UPDATED — decisions resolved. Ready for Milestone 1.**
-> Current milestone: *none* (start M1 on operator go).
+> Status: **M1 DONE (merged `95073427`) — next: M2.** VISION updated; decisions resolved.
+> Current milestone: **M2 — Context → agent-owned + `prequel`** (start on operator go).
+> M1 result: three facade tools on main; rendered facade schemas 1,995 B total (was 12,449);
+> suite 2,931/2,944 at head, sole failure = pre-existing `watchdog-lsp-diagnostics` parallel-load
+> flake (passes isolated on both heads). Reviewer accepted the fixes for its two blockers.
 > Read "Vision & mindset" below first — it is the guideline set for anyone working on
 > this plan, in any session, and it is the tie-breaker for implementation issues.
 
@@ -15,7 +18,10 @@ the principle beats the page: resolve it with this mindset, not by adding a spec
    (agent + config). The internal contract (executor, preflight, bridges) is stable; only
    the surface changes shape.
 2. **Impossible states unrepresentable.** Modes live in separate tools; a param exists on
-   exactly one tool and cannot appear on another. Prefer a schema shape that makes a wrong
+   exactly one tool and cannot appear on another — except the declared cross-cutting set
+   `{async, worktree}`, which carry identical meaning on both the delegation and workflow
+   facades and create no impossible call. The invariant test asserts the exempt set is exactly
+   `{async, worktree}` and never larger. Prefer a schema shape that makes a wrong
    call impossible over a rule the model must remember. Do not reach for `oneOf`/`if-then`
    to fake shape — split the surface instead.
 3. **Policy rides with the agent, not the call.** Context mode, recurring reads, skills,
@@ -168,7 +174,10 @@ is a safe checkpoint on its own.
 
 ### M1 — Facade (≈ 1 session)
 - **Files:** `src/extension/schemas.ts`, `src/extension/facade.ts` (new), `src/extension/index.ts`,
-  `src/extension/tool-description.ts`, `test/unit/schemas.test.ts`, `test/unit/tool-description.test.ts`
+  `src/extension/tool-description.ts`, `test/unit/schemas.test.ts`, `test/unit/tool-description.test.ts`,
+  `test/unit/index-child-registration.test.ts`, `test/unit/advertised-agent-refresh.test.ts`
+  (the last two are tests of the deleted single-tool surface — retarget to the new facades,
+  delete obsolete CRUD asserts; discovered during M1)
 - Add `SubagentDelegationParams` / `SubagentWorkflowParams` / `SubagentControlParams` —
   **projections derived from the internal full schema**, not hand-copied (no drift).
 - New `facade.ts` normalizes facade params → internal `SubagentParams` → `executePublic`.
@@ -177,7 +186,9 @@ is a safe checkpoint on its own.
 - Rewrite the three descriptions ≤ 60 words each; guide topics carry depth.
 - **Verify:** `npm run test:unit` green; `package-manifest.test.ts` green (exports unchanged);
   rendered bytes measured (target ≈ 1.5–2 kB total).
-- **Done-when:** one tool = one mode; invariant test proves no param name appears on two facades.
+- **Done-when:** one tool = one mode; invariant test proves no param name appears on two
+  facades except the declared cross-cutting set `{async, worktree}` (and asserts the exempt
+  set is never larger).
 
 ### M2 — Context → agent-owned + `prequel` (≈ 1 session)
 - **Files:** `src/shared/fork-context.ts`, `src/extension/config.ts`, `src/shared/types.ts`,
@@ -269,5 +280,7 @@ is a safe checkpoint on its own.
 
 1. Decide the D1 flag: is the script-level `runs.lanes` API truly removed? (open thread)
 2. Read `plan.md` + VISION.md — mindset section first; check the current-milestone marker.
-3. Start the marked milestone (M1 next). Follow the session protocol.
+3. Start **M2** (context → agent-owned + `prequel`): rewire `resolveSubagentContext`,
+   delete `config.defaultSubagentContext`, wire `prequel` consumption, agent frontmatter
+   `defaultContext`/`contextBrief`, docs. Follow the session protocol.
 4. Gate each milestone on `npm run test:unit` (+ `test:integration` from M2 on).
