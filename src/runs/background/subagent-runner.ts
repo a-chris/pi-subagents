@@ -45,14 +45,12 @@ import {
 	type RunFanoutBudgetDescriptor,
 	type SubagentRunMode,
 	type SubagentOutputState,
-	type UsageBudgetConfig,
 	type ToolBudgetState,
 	type Usage,
 	type WorkflowGraphSnapshot,
 	type SteeringTargetState,
 	type SteeringTargetStatus,
 	type SubagentChildStatusEvent,
-	type WorkflowLaneMetadata,
 	DEFAULT_MAX_OUTPUT,
 	type MaxOutputConfig,
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -141,7 +139,6 @@ import { appendRunnerStepsToStatus, consumeChainAppendRequests, countPendingChai
 import { asyncStatusChildIdentity } from "../shared/child-identity.ts";
 import { initialToolBudgetState, toolBudgetState } from "../shared/tool-budget.ts";
 import { effectiveToolTimeoutMs, formatToolTimeoutMessage, toolTimeoutCallKey } from "../shared/tool-timeout.ts";
-import { usageBudgetExceededMessage, usageBudgetState } from "../shared/usage-budget.ts";
 import { formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup, writeWorktreeSetupHandoff } from "../shared/parallel-handoff.ts";
 import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { acquireSessionLease, type SessionLeaseRequest } from "../shared/session-lease.ts";
@@ -204,7 +201,6 @@ export interface SubagentRunConfig {
 	/** Steer the running steps to checkpoint and stop this many ms before `deadlineAt`; absent = no checkpoint steer. */
 	checkpointBeforeDeadlineMs?: number;
 	toolBudget?: ResolvedToolBudget;
-	usageBudget?: UsageBudgetConfig;
 	revivalLease?: SessionLeaseRequest;
 	revivalLeaseToken?: string;
 	/** Global cap on simultaneously-running subagent tasks within this run. */
@@ -220,7 +216,6 @@ export interface SubagentRunConfig {
 	launchBarrierToken?: string;
 	parentWorkflowRunId?: string;
 	workflowKey?: string;
-	lane?: WorkflowLaneMetadata;
 }
 
 interface StepResult {
@@ -681,10 +676,6 @@ interface SingleStepContext {
 	onExternalStreamActivity?: () => void;
 	onExternalJob?: (status: ExternalJobStatus) => void;
 	skipAcceptance?: () => boolean;
-	/** Authoritative owner decision after event delivery; undefined includes incomplete run-wide usage. */
-	usageBudgetExhausted?: () => boolean | undefined;
-	/** Existing run-owned budget configuration; cost allowance is not settled by the live token ledger. */
-	usageBudget?: UsageBudgetConfig;
 	/** False when sibling work in the same Git worktree could have caused the tracked diff. */
 	trackedMutationEvidenceForCompletionGuard?: boolean;
 	orcaProgressTab?: OrcaProgressTab;
@@ -1319,7 +1310,6 @@ export async function runSingleStepInner(
 			interrupted: run.interrupted,
 			timedOut: run.timedOut || ctx.timeoutSignal?.aborted,
 			toolBudgetExhausted: run.toolBudgetBlocked || toolBudgetBlocked,
-			usageBudgetExhausted: ctx.usageBudgetExhausted?.(),
 			structuredOutputFailed: Boolean(structuredError),
 			acceptanceFailed: false,
 			currentTool: run.currentTool,
@@ -1848,7 +1838,6 @@ export async function runSubagent(
 	let checkpointTimer: NodeJS.Timeout | undefined;
 	let timedOut = false;
 	let stopped = false;
-	let usageBudgetExceeded = false;
 	const timeoutMessage = config.timeoutMs !== undefined ? `Subagent timed out after ${config.timeoutMs}ms.` : undefined;
 	const stopMessage = "Subagent stopped by user.";
 	const timeoutAbortController = new AbortController();
@@ -1874,7 +1863,6 @@ export async function runSubagent(
 				const taskSessionName = task.sessionName ?? deriveChildSessionName({ agent: task.agent, task: task.task, label: task.label });
 				initialStatusSteps.push(omitUndefinedProperties({
 					agent: task.agent,
-					...(task.lane ? { lane: task.lane } : config.lane ? { lane: config.lane } : {}),
 					...(taskSessionName ? { sessionName: taskSessionName } : {}),
 					...(externalRunnerStatus(task.runner) ? { runner: externalRunnerStatus(task.runner) } : {}),
 					...(statusStepDescription(task.task) ? { description: statusStepDescription(task.task) } : {}),
@@ -1928,7 +1916,6 @@ export async function runSubagent(
 			const stepSessionName = step.sessionName ?? deriveChildSessionName({ agent: step.agent, task: step.task, label: step.label });
 			initialStatusSteps.push(omitUndefinedProperties({
 				agent: step.agent,
-				...(step.lane ? { lane: step.lane } : config.lane ? { lane: config.lane } : {}),
 				...(stepSessionName ? { sessionName: stepSessionName } : {}),
 				...(externalRunnerStatus(step.runner) ? { runner: externalRunnerStatus(step.runner) } : {}),
 				...(statusStepDescription(step.task) ? { description: statusStepDescription(step.task) } : {}),
@@ -1993,7 +1980,6 @@ export async function runSubagent(
 		...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
 		...(config.deadlineAt !== undefined ? { deadlineAt: config.deadlineAt } : {}),
 		...(config.toolBudget ? { toolBudget: initialToolBudgetState(config.toolBudget) } : {}),
-		...(config.usageBudget ? { usageBudget: usageBudgetState(config.usageBudget, undefined) } : {}),
 		pid: process.pid,
 		cwd,
 		currentStep: 0,
@@ -2006,7 +1992,6 @@ export async function runSubagent(
 		...(config.runFanoutBudget ? { runFanoutBudget: getRunFanoutBudgetSnapshot(config.runFanoutBudget) } : {}),
 		...(config.parentWorkflowRunId ? { parentWorkflowRunId: config.parentWorkflowRunId } : {}),
 		...(config.workflowKey ? { workflowKey: config.workflowKey } : {}),
-		...(config.lane ? { lane: config.lane } : {}),
 		...(config.runnerProcessInstanceId ? { processTerminal: { version: 1 as const, state: "pending" as const, runId: id, runnerProcessInstanceId: config.runnerProcessInstanceId } } : {}),
 		steps: initialStatusSteps,
 		artifactsDir,
@@ -2054,30 +2039,6 @@ export async function runSubagent(
 	}
 	runPersistence.write(statusPath, { ...statusPayload });
 
-	let pendingParallelUsageCost: CostSummary = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-	const currentUsageTotals = (): CostSummary => {
-		const cost = results.reduce<CostSummary>((sum, result) => ({
-			inputTokens: sum.inputTokens + (result.totalCost?.inputTokens ?? result.usage?.input ?? 0),
-			outputTokens: sum.outputTokens + (result.totalCost?.outputTokens ?? result.usage?.output ?? 0),
-			costUsd: sum.costUsd + (result.totalCost?.costUsd ?? result.usage?.cost ?? 0),
-		}), { inputTokens: pendingParallelUsageCost.inputTokens, outputTokens: pendingParallelUsageCost.outputTokens, costUsd: pendingParallelUsageCost.costUsd });
-		return {
-			inputTokens: Math.max(cost.inputTokens, statusPayload.totalTokens?.input ?? 0),
-			outputTokens: Math.max(cost.outputTokens, statusPayload.totalTokens?.output ?? 0),
-			costUsd: cost.costUsd,
-		};
-	};
-	const refreshUsageBudget = () => {
-		setOptionalProperty(statusPayload, "usageBudget", usageBudgetState(config.usageBudget, currentUsageTotals()));
-		return statusPayload.usageBudget;
-	};
-	// Continuation admission only: the existing ledger has no in-flight cost or
-	// external/import usage coverage. Never change ordinary budget enforcement.
-	let continuationUsageUncertain = config.steps.some(isDynamicRunnerGroup) || flatSteps.some((step) => Boolean(step.runner || step.importAsyncRoot));
-	const continuationUsageBudgetExhausted = (): boolean | undefined => {
-		const exhausted = refreshUsageBudget()?.exhausted === true;
-		return exhausted ? true : config.usageBudget && continuationUsageUncertain ? undefined : false;
-	};
 	const emitNestedSelfEvent = (type: "subagent.nested.updated" | "subagent.nested.completed"): void => {
 		if (!config.nestedRoute || !config.nestedSelf) return;
 		try {
@@ -3005,10 +2966,6 @@ export async function runSubagent(
 			appendRecentStepOutput(step, stripAcceptanceReport(extractTextFromContent(event.message.content)).split("\n").slice(-10));
 			step.turnCount = (step.turnCount ?? 0) + 1;
 			const usage = event.message.usage;
-			if (config.usageBudget) {
-				const known = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0;
-				if (!known(usage?.input ?? usage?.inputTokens) || !known(usage?.output ?? usage?.outputTokens)) continuationUsageUncertain = true;
-			}
 			if (usage) {
 				const input = usage.input ?? usage.inputTokens ?? 0;
 				const output = usage.output ?? usage.outputTokens ?? 0;
@@ -3019,7 +2976,6 @@ export async function runSubagent(
 				const totalInput = statusPayload.totalTokens?.input ?? 0;
 				const totalOutput = statusPayload.totalTokens?.output ?? 0;
 				statusPayload.totalTokens = { input: totalInput + input, output: totalOutput + output, total: totalInput + totalOutput + input + output, window, windowPeak: Math.max(statusPayload.totalTokens?.windowPeak ?? 0, window) };
-				refreshUsageBudget();
 			}
 			statusPayload.turnCount = Math.max(statusPayload.turnCount ?? 0, step.turnCount);
 		}
@@ -3337,16 +3293,6 @@ export async function runSubagent(
 		if (interrupted || timedOut || stopped) break;
 		consumePendingAppendRequests();
 		if (stepCursor >= steps.length) break;
-		refreshUsageBudget();
-		if (statusPayload.usageBudget?.exhausted) {
-			usageBudgetExceeded = true;
-			statusPayload.state = "failed";
-			statusPayload.error = usageBudgetExceededMessage(statusPayload.usageBudget);
-			statusPayload.currentStep = flatIndex;
-			statusPayload.lastUpdate = Date.now();
-			writeStatusPayload();
-			break;
-		}
 		const stepIndex = stepCursor++;
 		const step = steps[stepIndex]!;
 
@@ -3571,22 +3517,6 @@ export async function runSubagent(
 			let aborted = false;
 			const parallelResults = await mapConcurrent(dynamicSteps, concurrency, async (task, taskIdx): Promise<StepResult> => {
 				const fi = groupStartFlatIndex + taskIdx;
-				refreshUsageBudget();
-				if (statusPayload.usageBudget?.exhausted) {
-					const skippedAt = Date.now();
-					const message = usageBudgetExceededMessage(statusPayload.usageBudget);
-					requiredStatusStep(statusPayload, fi).status = "failed";
-					requiredStatusStep(statusPayload, fi).error = message;
-					requiredStatusStep(statusPayload, fi).startedAt = skippedAt;
-					requiredStatusStep(statusPayload, fi).endedAt = skippedAt;
-					requiredStatusStep(statusPayload, fi).durationMs = 0;
-					requiredStatusStep(statusPayload, fi).exitCode = 1;
-					statusPayload.lastUpdate = skippedAt;
-					usageBudgetExceeded = true;
-					writeStatusPayload();
-					appendJsonl(eventsPath, JSON.stringify({ type: "subagent.step.failed", ts: skippedAt, runId: id, stepIndex: fi, agent: task.agent, exitCode: 1, durationMs: 0 }));
-					return omitUndefinedProperties({ agent: task.agent, ...(task.sessionName ? { sessionName: task.sessionName } : {}), context: task.context, output: message, error: message, exitCode: 1 as number | null, skipped: true });
-				}
 				if (timedOut) return timedOutStepResult(task.agent, task.context, task.sessionName);
 				if (stopped) return stoppedStepResult(task.agent, task.context, task.sessionName);
 				if (childStopRequests.has(fi)) return childStopResult(fi, task.agent, task.context);
@@ -3649,8 +3579,6 @@ export async function runSubagent(
 					onExternalStreamActivity: () => recordExternalStreamActivity(fi),
 					onExternalJob: (externalJob) => updateExternalJob(fi, externalJob),
 					skipAcceptance: () => timedOut || stopped || childStopRequests.has(fi),
-					usageBudgetExhausted: continuationUsageBudgetExhausted,
-					usageBudget: config.usageBudget,
 					orcaProgressTab,
 				}), config.deadlineAt);
 				const taskEndTime = Date.now();
@@ -3672,14 +3600,6 @@ export async function runSubagent(
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "requestedModel", singleResult.requestedModel);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "contextOverflow", singleResult.contextOverflow);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "totalCost", singleResult.totalCost);
-				if (singleResult.totalCost) {
-					pendingParallelUsageCost = {
-						inputTokens: pendingParallelUsageCost.inputTokens + singleResult.totalCost.inputTokens,
-						outputTokens: pendingParallelUsageCost.outputTokens + singleResult.totalCost.outputTokens,
-						costUsd: pendingParallelUsageCost.costUsd + singleResult.totalCost.costUsd,
-					};
-					refreshUsageBudget();
-				}
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "error", stopped || childStopped ? stopMessage : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptPath", singleResult.transcriptPath ?? requiredStatusStep(statusPayload, fi).transcriptPath);
 				setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptError", singleResult.transcriptError);
@@ -3759,8 +3679,6 @@ export async function runSubagent(
 					capabilityAudit: pr.capabilityAudit,
 				}));
 			}
-			pendingParallelUsageCost = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-			refreshUsageBudget();
 			const collection = collectDynamicResults(step as Parameters<typeof collectDynamicResults>[0], materialized.items, parallelResults);
 			const failures = parallelResults.filter((result) => result.exitCode !== 0 && result.exitCode !== -1);
 			const acceptanceFailures = parallelResults
@@ -3884,7 +3802,7 @@ export async function runSubagent(
 						signal: setupSignal,
 						deadlineAt: config.deadlineAt,
 						agents: group.parallel.map((task) => task.agent),
-						labels: group.parallel.map((task) => task.lane?.key ?? config.workflowKey ?? task.outputName ?? task.label),
+						labels: group.parallel.map((task) => config.workflowKey ?? task.outputName ?? task.label),
 						tasks: group.parallel.map((task) => task.task),
 						provider: config.worktreeProvider,
 						baseRef: config.baseRef,
@@ -3905,7 +3823,6 @@ export async function runSubagent(
 								stepIndex,
 								flatStartIndex: groupStartFlatIndex,
 								progress,
-								laneBindings: handoffWorkflowKey || config.lane ? [{ index: groupStartFlatIndex, taskIndex: 0, ...(handoffWorkflowKey ? { workflowKey: handoffWorkflowKey } : {}), ...(handoffChildRunId ? { runId: handoffChildRunId } : {}), ...(config.lane ? { lane: config.lane } : {}) }] : undefined,
 							});
 							if (!pendingHandoff) return;
 							statusPayload.parallelHandoff = pendingHandoff;
@@ -3963,25 +3880,6 @@ export async function runSubagent(
 					concurrency,
 					async (task, taskIdx): Promise<StepResult> => {
 						const fi = groupStartFlatIndex + taskIdx;
-						refreshUsageBudget();
-						if (statusPayload.usageBudget?.exhausted) {
-							const skippedAt = Date.now();
-							const message = usageBudgetExceededMessage(statusPayload.usageBudget);
-							requiredStatusStep(statusPayload, fi).status = "failed";
-							requiredStatusStep(statusPayload, fi).error = message;
-							requiredStatusStep(statusPayload, fi).startedAt = skippedAt;
-							requiredStatusStep(statusPayload, fi).endedAt = skippedAt;
-							requiredStatusStep(statusPayload, fi).durationMs = 0;
-							requiredStatusStep(statusPayload, fi).exitCode = 1;
-							delete requiredStatusStep(statusPayload, fi).activityState;
-							statusPayload.lastUpdate = skippedAt;
-							usageBudgetExceeded = true;
-							writeStatusPayload();
-							appendJsonl(eventsPath, JSON.stringify({
-								type: "subagent.step.failed", ts: skippedAt, runId: id, stepIndex: fi, agent: task.agent, exitCode: 1, durationMs: 0,
-							}));
-							return omitUndefinedProperties({ agent: task.agent, ...(task.sessionName ? { sessionName: task.sessionName } : {}), context: task.context, output: message, error: message, exitCode: 1 as number | null, skipped: true });
-						}
 						if (timedOut) return timedOutStepResult(task.agent, task.context, task.sessionName);
 						if (stopped) return stoppedStepResult(task.agent, task.context, task.sessionName);
 						if (childStopRequests.has(fi)) return childStopResult(fi, task.agent, task.context);
@@ -4060,8 +3958,6 @@ export async function runSubagent(
 							onExternalStreamActivity: () => recordExternalStreamActivity(fi),
 							onExternalJob: (externalJob) => updateExternalJob(fi, externalJob),
 							skipAcceptance: () => timedOut || stopped || childStopRequests.has(fi),
-							usageBudgetExhausted: continuationUsageBudgetExhausted,
-							usageBudget: config.usageBudget,
 							orcaProgressTab,
 						}), config.deadlineAt);
 						if (task.sessionFile) {
@@ -4089,14 +3985,6 @@ export async function runSubagent(
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "requestedModel", singleResult.requestedModel);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "contextOverflow", singleResult.contextOverflow);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "totalCost", singleResult.totalCost);
-						if (singleResult.totalCost) {
-							pendingParallelUsageCost = {
-								inputTokens: pendingParallelUsageCost.inputTokens + singleResult.totalCost.inputTokens,
-								outputTokens: pendingParallelUsageCost.outputTokens + singleResult.totalCost.outputTokens,
-								costUsd: pendingParallelUsageCost.costUsd + singleResult.totalCost.costUsd,
-							};
-							refreshUsageBudget();
-						}
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "error", stopped || childStopped ? stopMessage : timedOut ? (timeoutMessage ?? "Subagent timed out.") : singleResult.error);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptPath", singleResult.transcriptPath ?? requiredStatusStep(statusPayload, fi).transcriptPath);
 						setOptionalProperty(requiredStatusStep(statusPayload, fi), "transcriptError", singleResult.transcriptError);
@@ -4215,8 +4103,6 @@ export async function runSubagent(
 						watchdog: pr.watchdog,
 					}));
 				}
-				pendingParallelUsageCost = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
-				refreshUsageBudget();
 				for (let t = 0; t < group.parallel.length; t++) {
 					const outputName = group.parallel[t]?.outputName;
 					if (outputName) outputs[outputName] = outputEntryFromAsyncResult({
@@ -4258,7 +4144,6 @@ export async function runSubagent(
 								agent: result.agent,
 								...(handoffWorkflowKey ? { workflowKey: handoffWorkflowKey } : {}),
 								...(handoffChildRunId ? { runId: handoffChildRunId } : {}),
-								...(config.lane ? { lane: config.lane } : {}),
 								status: result.stopped || (result.exitCode !== 0 && isUnexplainedProcessSignal(omitUndefinedProperties({
 									processSignal: result.processSignal,
 									interrupted: result.interrupted,
@@ -4336,7 +4221,7 @@ export async function runSubagent(
 						signal: setupSignal,
 						deadlineAt: config.deadlineAt,
 						agents: [seqStep.agent],
-						labels: [seqStep.lane?.key ?? config.workflowKey ?? seqStep.outputName ?? seqStep.label],
+						labels: [config.workflowKey ?? seqStep.outputName ?? seqStep.label],
 						tasks: [seqStep.task],
 						provider: config.worktreeProvider,
 						baseRef: config.baseRef,
@@ -4360,7 +4245,6 @@ export async function runSubagent(
 								stepIndex,
 								flatStartIndex: flatIndex,
 								progress,
-								laneBindings: handoffWorkflowKey || config.lane ? [{ index: flatIndex, taskIndex: 0, ...(handoffWorkflowKey ? { workflowKey: handoffWorkflowKey } : {}), ...(handoffChildRunId ? { runId: handoffChildRunId } : {}), ...(config.lane ? { lane: config.lane } : {}) }] : undefined,
 							});
 							if (!pendingHandoff) return;
 							statusPayload.parallelHandoff = pendingHandoff;
@@ -4460,8 +4344,6 @@ export async function runSubagent(
 				onExternalStreamActivity: () => recordExternalStreamActivity(flatIndex),
 				onExternalJob: (externalJob) => updateExternalJob(flatIndex, externalJob),
 				skipAcceptance: () => timedOut || stopped || childStopRequests.has(flatIndex),
-				usageBudgetExhausted: continuationUsageBudgetExhausted,
-				usageBudget: config.usageBudget,
 				orcaProgressTab,
 				}), config.deadlineAt);
 			} catch (error) {
@@ -4636,7 +4518,6 @@ export async function runSubagent(
 							agent: singleResult.agent,
 							...(handoffWorkflowKey ? { workflowKey: handoffWorkflowKey } : {}),
 							...(handoffChildRunId ? { runId: handoffChildRunId } : {}),
-							...(config.lane ? { lane: config.lane } : {}),
 							status: singleResult.stopped ? "stopped" as const : singleResult.interrupted ? "paused" as const : singleResult.exitCode === 0 ? "completed" as const : "failed" as const,
 							summary: singleResult.output || singleResult.error || "(no output)",
 							...(singleResult.artifactPaths?.outputPath ? { outputPath: singleResult.artifactPaths.outputPath } : {}),
@@ -4798,13 +4679,13 @@ export async function runSubagent(
 		timedOut: result.timedOut,
 		stopped: result.stopped,
 	})));
-	const partialWithEvidence = !stopped && !signalTerminated && !timedOut && !usageBudgetExceeded && !interrupted && results.some(partialEvidenceResult) && !results.some(concreteFailureResult);
+	const partialWithEvidence = !stopped && !signalTerminated && !timedOut && !interrupted && results.some(partialEvidenceResult) && !results.some(concreteFailureResult);
 	// Flush while still nonterminal; deferred status retries retain that state snapshot.
 	statusWriteCoalescer.flush(statusPath);
 	const publication = new Promise<void>((resolve, reject) => {
 		finalResultPublication = { resolve, reject };
 	});
-	statusPayload.state = stopped || signalTerminated ? "stopped" : timedOut || usageBudgetExceeded ? "failed" : interrupted ? "paused" : results.every((r) => r.success) ? "complete" : partialWithEvidence ? "partial" : "failed";
+	statusPayload.state = stopped || signalTerminated ? "stopped" : timedOut ? "failed" : interrupted ? "paused" : results.every((r) => r.success) ? "complete" : partialWithEvidence ? "partial" : "failed";
 	closeSteerInbox(asyncDir, statusPayload.state, (filePath, payload) => runPersistence.write(filePath, payload));
 	for (const request of consumeSteerRequests(asyncDir)) deliverSteerRequest(request);
 	const effectiveSessionFile = sessionFile ?? latestSessionFile;
@@ -4833,9 +4714,6 @@ export async function runSubagent(
 		statusPayload.timedOut = true;
 		statusPayload.error = timeoutMessage ?? "Subagent timed out.";
 	}
-	if (usageBudgetExceeded && statusPayload.usageBudget && !statusPayload.error) {
-		statusPayload.error = usageBudgetExceededMessage(statusPayload.usageBudget);
-	}
 	if (partialWithEvidence) {
 		const partialResult = results.find(partialEvidenceResult);
 		statusPayload.activityState = "needs_attention";
@@ -4849,7 +4727,6 @@ export async function runSubagent(
 	setOptionalProperty(statusPayload, "sessionFile", effectiveSessionFile);
 	if (singleRuntimeAcknowledgedExtensions) statusPayload.runtimeAcknowledgedExtensions = singleRuntimeAcknowledgedExtensions;
 	setOptionalProperty(statusPayload, "totalCost", finalTotalCost);
-	setOptionalProperty(statusPayload, "usageBudget", usageBudgetState(config.usageBudget, currentUsageTotals()));
 	setOptionalProperty(statusPayload, "shareUrl", shareUrl);
 	setOptionalProperty(statusPayload, "gistUrl", gistUrl);
 	setOptionalProperty(statusPayload, "shareError", shareError);
@@ -4872,13 +4749,12 @@ export async function runSubagent(
 			mode: resultMode,
 			success: statusPayload.state === "complete",
 			state: statusPayload.state,
-			summary: stopped ? stopMessage : signalTerminated ? (statusPayload.error ?? "Subagent process terminated by signal.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : usageBudgetExceeded ? (statusPayload.error ?? "Usage budget exhausted.") : interrupted ? "Paused after interrupt. Waiting for explicit next action." : statusPayload.state === "partial" ? (statusPayload.error ?? summary) : summary,
+			summary: stopped ? stopMessage : signalTerminated ? (statusPayload.error ?? "Subagent process terminated by signal.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : interrupted ? "Paused after interrupt. Waiting for explicit next action." : statusPayload.state === "partial" ? (statusPayload.error ?? summary) : summary,
 			...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
 			...(config.deadlineAt !== undefined ? { deadlineAt: config.deadlineAt } : {}),
 			...(statusPayload.toolBudget ? { toolBudget: statusPayload.toolBudget } : {}),
 			...(statusPayload.toolBudgetBlocked ? { toolBudgetBlocked: true } : {}),
-			...(statusPayload.usageBudget ? { usageBudget: statusPayload.usageBudget } : {}),
-			...(stopped ? { stopped: true, error: stopMessage } : timedOut ? { timedOut: true, error: timeoutMessage ?? "Subagent timed out." } : usageBudgetExceeded ? { error: statusPayload.error ?? "Usage budget exhausted." } : {}),
+			...(stopped ? { stopped: true, error: stopMessage } : timedOut ? { timedOut: true, error: timeoutMessage ?? "Subagent timed out." } : {}),
 			results: results.map((r) => omitUndefinedProperties({
 				agent: r.agent,
 				...(r.sessionName ? { sessionName: r.sessionName } : {}),
@@ -4940,7 +4816,6 @@ export async function runSubagent(
 			durationMs: runEndedAt - overallStartTime,
 			totalTokens: statusPayload.totalTokens,
 			totalCost: finalTotalCost,
-			usageBudget: statusPayload.usageBudget,
 			truncated,
 			artifactsDir,
 			cwd,
@@ -4981,7 +4856,6 @@ export async function runSubagent(
 			durationMs: runEndedAt - overallStartTime,
 			totalTokens: statusPayload.totalTokens,
 			totalCost: finalTotalCost,
-			usageBudget: statusPayload.usageBudget,
 		}),
 	);
 	writeRunLog(logPath, omitUndefinedProperties({

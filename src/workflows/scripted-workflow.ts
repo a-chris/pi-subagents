@@ -289,11 +289,11 @@ function hostCall(method, args, observation) {
     : promise;
 }
 
-function runHostCall(key, params, collectFailure, batch, generatedLaneKey) {
+function runHostCall(key, params, collectFailure, batch) {
   const callId = ++nextCallId;
   const promise = new Promise((resolve, reject) => {
     pending.set(callId, { resolve, reject });
-    parentPort.postMessage({ type: "call", callId, method: "run", args: { key, params, ...(collectFailure ? { collectFailure: true } : {}), ...(batch ? { batch } : {}), ...(generatedLaneKey ? { generatedLaneKey } : {}) } });
+    parentPort.postMessage({ type: "call", callId, method: "run", args: { key, params, ...(collectFailure ? { collectFailure: true } : {}), ...(batch ? { batch } : {}) } });
   });
   return { key, callId, promise };
 }
@@ -304,16 +304,13 @@ function isArrayIndexProperty(prop) {
   return Number.isSafeInteger(index) && index >= 0 && index < 4294967295;
 }
 
+function validateLaneKey(value, owner) {
+  if (typeof value !== "string" || !runKeyPattern.test(value)) throw new Error(owner + " key must be 1-128 characters using letters, numbers, '.', '_' or '-', and start with a letter or number.");
+  return value;
+}
+
 const runsAllResultTargets = new WeakMap();
 
-const MAX_LANES = 32;
-const MAX_LANE_STAGES = 16;
-const MAX_LANE_STAGE_COUNT = 64;
-const MAX_LANE_SPEC_BYTES = 64 * 1024;
-const MAX_LANE_TASK_BYTES = 1024 * 1024;
-const MAX_LANE_PATH_BYTES = 32 * 1024;
-const MAX_LANE_BOARD_TEXT_BYTES = 256;
-const LANE_PATH_FIELDS = new Set(["cwd", "output", "sessionDir"]);
 
 function runsAllKeyAccessError(prop) {
   return new Error("Cannot read runs.all result property '" + prop + "'. runs.all resolves to an ordered array, not a key map. Use results[0], array destructuring, or results.map((result) => result.output), not results." + prop + ".");
@@ -334,241 +331,6 @@ function wrapRunsAllResults(results, keys) {
   return proxy;
 }
 
-function laneByteLength(value) {
-  return new TextEncoder().encode(value).byteLength;
-}
-
-function laneBoardText(value) {
-  if (typeof value !== "string" || !value) return undefined;
-  if (laneByteLength(value) <= MAX_LANE_BOARD_TEXT_BYTES) return value;
-  const bytes = new TextEncoder().encode(value).subarray(0, MAX_LANE_BOARD_TEXT_BYTES - 3);
-  return new TextDecoder().decode(bytes) + "...";
-}
-
-function laneBoardPath(value) {
-  if (typeof value !== "string" || !value || laneByteLength(value) > MAX_LANE_BOARD_TEXT_BYTES) return undefined;
-  return value;
-}
-
-function validateLaneStageBounds(params, label) {
-  if (typeof params.task === "string" && laneByteLength(params.task) > MAX_LANE_TASK_BYTES) throw new Error(label + " task exceeds 1 MiB when UTF-8 encoded.");
-  for (const field of LANE_PATH_FIELDS) if (typeof params[field] === "string" && laneByteLength(params[field]) > MAX_LANE_PATH_BYTES) throw new Error(label + " " + field + " exceeds 32 KiB when UTF-8 encoded.");
-}
-
-function validateLaneKey(value, owner) {
-  if (typeof value !== "string" || !runKeyPattern.test(value)) throw new Error(owner + " key must be 1-128 characters using letters, numbers, '.', '_' or '-', and start with a letter or number.");
-  return value;
-}
-
-function laneStageParams(stage, previous) {
-  const resume = stage.resume;
-  const params = { ...stage.params };
-  if (resume !== "previous") return params;
-  if (!previous || typeof previous.runId !== "string" || !previous.runId.trim()) return undefined;
-  return { ...params, resume: previous.runId.trim() };
-}
-
-function laneStageVerdict(result) {
-  const structured = result && typeof result === "object" && !Array.isArray(result) ? result.structuredOutput : undefined;
-  const verdict = structured && typeof structured === "object" && !Array.isArray(structured) ? structured.verdict : undefined;
-  return typeof verdict === "string" && verdict.trim() ? laneBoardText(verdict.trim()) : undefined;
-}
-
-function laneStageIsBlocked(result) {
-  const structured = result && typeof result === "object" && !Array.isArray(result) ? result.structuredOutput : undefined;
-  return structured && typeof structured === "object" && !Array.isArray(structured) && structured.verdict === "blocked";
-}
-
-function laneStageRecord(stageKey, child, forcedState) {
-  const result = child && typeof child === "object" && !Array.isArray(child) ? child : undefined;
-  const ok = result?.ok === true;
-  const verdict = laneStageVerdict(result);
-  const blocked = laneStageIsBlocked(result);
-  const state = forcedState ?? (result?.stopped ? "stopped" : result?.detached ? "detached" : ok ? blocked ? "blocked" : "completed" : "failed");
-  const error = state !== "completed"
-    ? state === "blocked" && blocked
-      ? "Stage returned a blocked verdict."
-      : typeof result?.error === "string"
-        ? result.error
-        : typeof result?.output === "string"
-          ? result.output
-          : "Stage did not complete successfully."
-    : undefined;
-  return {
-    key: stageKey,
-    ...(typeof result?.runId === "string" && result.runId.trim() ? { runId: laneBoardText(result.runId.trim()) } : {}),
-    ...(result ? { ok } : {}),
-    state,
-    ...(typeof result?.outputReference === "string" ? (laneBoardPath(result.outputReference) ? { outputReference: laneBoardPath(result.outputReference) } : {}) : {}),
-    ...(verdict ? { verdict } : {}),
-    ...(error ? { error: laneBoardText(error) } : {}),
-  };
-}
-
-function laneFailure(stageKey, error) {
-  const text = error instanceof Error ? error.message : String(error);
-  return { key: stageKey, ok: false, output: text, error: text, artifactPaths: [] };
-}
-
-function runCollected(key, params, observe, generatedLaneKey) {
-  validateRunCall(key, params, "runs.lanes stage", runFingerprints);
-  const launched = runHostCall(key, params, true, undefined, generatedLaneKey);
-  observe([{ key, operation: "run", callId: launched.callId }]);
-  return launched.promise.then(decorateWorkflowChildResult);
-}
-
-function validateLaneSpecs(laneSpecs) {
-  if (!Array.isArray(laneSpecs)) throw new Error("runs.lanes(lanes) requires an array.");
-  if (laneSpecs.length === 0) throw new Error("runs.lanes(lanes) requires at least one lane.");
-  if (laneSpecs.length > MAX_LANES) throw new Error("runs.lanes supports at most " + MAX_LANES + " lanes.");
-  assertJsonValue(laneSpecs, "runs.lanes lanes");
-  if (laneByteLength(stableRunJson(laneSpecs)) > MAX_LANE_SPEC_BYTES) throw new Error("runs.lanes canonical JSON exceeds 64 KiB.");
-  const generatedKeys = new Set();
-  const validationFingerprints = new Map();
-  let stageCount = 0;
-  const normalized = [];
-  for (let laneIndex = 0; laneIndex < laneSpecs.length; laneIndex++) {
-    const lane = laneSpecs[laneIndex];
-    const laneLabel = "runs.lanes lane " + laneIndex;
-    if (!lane || typeof lane !== "object" || Array.isArray(lane)) throw new Error(laneLabel + " must be an object.");
-    const laneFields = Object.keys(lane);
-    if (laneFields.some((field) => field !== "key" && field !== "stages")) throw new Error(laneLabel + " contains unsupported fields.");
-    const laneKey = validateLaneKey(lane.key, laneLabel);
-    if (!Array.isArray(lane.stages) || lane.stages.length === 0) throw new Error(laneLabel + " stages must contain at least one stage.");
-    if (lane.stages.length > MAX_LANE_STAGES) throw new Error(laneLabel + " supports at most " + MAX_LANE_STAGES + " stages.");
-    const stageKeys = new Set();
-    const stages = [];
-    for (let stageIndex = 0; stageIndex < lane.stages.length; stageIndex++) {
-      stageCount++;
-      if (stageCount > MAX_LANE_STAGE_COUNT) throw new Error("runs.lanes supports at most " + MAX_LANE_STAGE_COUNT + " total stages.");
-      const stage = lane.stages[stageIndex];
-      const stageLabel = laneLabel + " stage " + stageIndex;
-      if (!stage || typeof stage !== "object" || Array.isArray(stage)) throw new Error(stageLabel + " must be an object.");
-      const stageKey = validateLaneKey(stage.key, stageLabel);
-      if (stageKeys.has(stageKey)) throw new Error(laneLabel + " contains duplicate stage key '" + stageKey + "'.");
-      stageKeys.add(stageKey);
-      const generatedKey = laneKey + "." + stageKey;
-      validateLaneKey(generatedKey, stageLabel + " generated");
-      if (generatedKeys.has(generatedKey)) throw new Error("runs.lanes generated child key '" + generatedKey + "' is duplicated.");
-      generatedKeys.add(generatedKey);
-      const resume = stage.resume;
-      if (resume !== undefined && resume !== "previous") {
-        if (stageIndex === 0 && typeof resume === "string") {
-          throw new Error(stageLabel + " cannot resume a retained run id in runs.lanes; use runs.run(key, { resume: id }) outside lanes, or start the lane with an agent stage and use resume: \"previous\" later.");
-        }
-        throw new Error(stageLabel + " resume must be 'previous'.");
-      }
-      if (stageIndex === 0 && resume === "previous") throw new Error(stageLabel + " cannot resume previous without a predecessor stage.");
-      const { key: _stageKey, resume: _resume, ...params } = stage;
-      const validationParams = resume === "previous" ? { ...params, resume: "retained-run-placeholder" } : params;
-      validateLaneStageBounds(validationParams, stageLabel);
-      validateRunCall(generatedKey, validationParams, stageLabel, validationFingerprints);
-      const existingFingerprint = runFingerprints.get(generatedKey);
-      if (existingFingerprint !== undefined && (resume === "previous" || existingFingerprint !== stableRunJson(canonicalRunParams(params)))) {
-        throw new Error("runs.lanes generated child key '" + generatedKey + "' is already used with incompatible launch params.");
-      }
-      stages.push({ key: stageKey, generatedKey, resume, params });
-    }
-    normalized.push({ key: laneKey, stages });
-  }
-  return normalized;
-}
-
-function runLane(lane, firstResult, observe) {
-  const records = [];
-  const appendSkipped = (start) => {
-    for (let index = start; index < lane.stages.length; index++) records.push({ key: lane.stages[index].key, state: "skipped" });
-  };
-  const finish = (state, failedStage) => ({ key: lane.key, state, ...(failedStage ? { failedStage } : {}), stages: records });
-  const visit = (index, previous) => {
-    if (index >= lane.stages.length) return Promise.resolve(finish("complete"));
-    const stage = lane.stages[index];
-    if (index === 0) {
-      const record = laneStageRecord(stage.key, previous);
-      records.push(record);
-      if (record.state !== "completed") {
-        appendSkipped(index + 1);
-        return Promise.resolve(finish("blocked", stage.key));
-      }
-      return visit(index + 1, previous);
-    }
-    if (stage.resume === "previous" && (!previous || typeof previous.runId !== "string" || !previous.runId.trim())) {
-      records.push({ key: stage.key, state: "blocked", error: "Previous stage did not return a retained run id." });
-      appendSkipped(index + 1);
-      return Promise.resolve(finish("blocked", stage.key));
-    }
-    if (!previous || previous.ok !== true || laneStageIsBlocked(previous)) {
-      records.push({ key: stage.key, state: "blocked", error: "Previous stage did not complete successfully." });
-      appendSkipped(index + 1);
-      return Promise.resolve(finish("blocked", stage.key));
-    }
-    const params = laneStageParams(stage, previous);
-    if (!params) {
-      records.push({ key: stage.key, state: "blocked", error: "Previous stage did not return a retained run id." });
-      appendSkipped(index + 1);
-      return Promise.resolve(finish("blocked", stage.key));
-    }
-    let launched;
-    try {
-      launched = runCollected(stage.generatedKey, params, observe, lane.key);
-    } catch (error) {
-      const failed = laneFailure(stage.generatedKey, error);
-      records.push(laneStageRecord(stage.key, failed));
-      appendSkipped(index + 1);
-      return Promise.resolve(finish("blocked", stage.key));
-    }
-    return launched.then((result) => {
-      const record = laneStageRecord(stage.key, result);
-      records.push(record);
-      if (record.state === "completed") return visit(index + 1, result);
-      appendSkipped(index + 1);
-      return finish("blocked", stage.key);
-    }, (error) => {
-      const failed = laneFailure(stage.generatedKey, error);
-      records.push(laneStageRecord(stage.key, failed));
-      appendSkipped(index + 1);
-      return finish("blocked", stage.key);
-    });
-  };
-  return visit(0, firstResult);
-}
-
-function workflowPlanStringMetadata(params) {
-  return {
-    ...(typeof params.phase === "string" && params.phase.trim() ? { phase: params.phase.trim() } : {}),
-    ...(typeof params.label === "string" && params.label.trim() ? { label: params.label.trim() } : {}),
-    ...(typeof params.agent === "string" && params.agent.trim() ? { agent: params.agent.trim() } : {}),
-  };
-}
-
-function runLanes(laneSpecs) {
-  const lanes = validateLaneSpecs(laneSpecs);
-  parentPort.postMessage({ type: "lanePlan", lanes: lanes.map((lane) => ({
-    key: lane.key,
-    stages: lane.stages.map((stage) => ({
-      key: stage.key,
-      generatedKey: stage.generatedKey,
-      ...workflowPlanStringMetadata(stage.params),
-      ...(typeof stage.params.as === "string" && stage.params.as.trim() ? { outputName: stage.params.as.trim() } : {}),
-      ...(stage.params.outputSchema ? { structured: true } : {}),
-    })),
-  })) });
-  const firstItems = lanes.map((lane) => {
-    const first = lane.stages[0];
-    return { key: first.generatedKey, ...first.params };
-  });
-  // Share the runs.all batch launcher while allowing each lane to advance independently.
-  const firstBatch = launchRunsAll(firstItems, lanes.map((lane) => lane.key));
-  const firstResults = firstBatch.launched.map(({ promise }) => promise.then(decorateWorkflowChildResult));
-  let trackedAggregate;
-  const observe = (observations) => trackRunObservation(observations, trackedAggregate);
-  const laneAggregate = Promise.all(lanes.map((lane, index) => firstResults[index].then(
-    (result) => runLane(lane, result, observe),
-    (error) => runLane(lane, laneFailure(lane.stages[0].generatedKey, error), observe),
-  )));
-  trackedAggregate = trackRunObservation(firstBatch.launched.map(({ key, callId }) => ({ key, operation: "run", callId })), laneAggregate);
-  return trackedAggregate;
-}
 
 function formatRef(result) {
   if (!result || typeof result !== "object") throw new Error("runs.ref(result) requires a run result object.");
@@ -614,24 +376,6 @@ function validateExtensionBindings(value, label) {
   if (new TextEncoder().encode(stableRunJson(value)).byteLength > 16384) throw new Error(label + " extensionBindings canonical JSON exceeds 16384 bytes.");
 }
 
-function validateLaneMetadata(value, label, workflowKey) {
-  if (value === undefined) return;
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(label + " must be a plain JSON object.");
-  const fields = Object.keys(value);
-  const allowed = ["version", "key", "mode", "sourceRef", "claims", "outputPaths"];
-  const unknown = fields.filter((field) => !allowed.includes(field));
-  if (unknown.length > 0) throw new Error(label + " has unsupported fields: " + unknown.join(", ") + ".");
-  if (value.version !== 1) throw new Error(label + ".version must be 1.");
-  if (typeof value.key !== "string" || !value.key.trim() || !runKeyPattern.test(value.key.trim())) throw new Error(label + ".key is invalid.");
-  if (workflowKey !== undefined && value.key.trim() !== workflowKey) throw new Error(label + ".key must match workflow key '" + workflowKey + "'.");
-  if (value.mode !== undefined && !["mutation", "review", "scout", "gate"].includes(value.mode)) throw new Error(label + ".mode is invalid.");
-  const bounded = (entry, maxBytes) => typeof entry === "string" && entry.trim() && new TextEncoder().encode(entry.trim()).byteLength <= maxBytes && !/[\r\n\u0000]/.test(entry);
-  if (value.sourceRef !== undefined && !bounded(value.sourceRef, 128)) throw new Error(label + ".sourceRef is invalid.");
-  for (const [name, maxItems, maxLength] of [["claims", 20, 160], ["outputPaths", 10, 256]]) {
-    if (value[name] === undefined) continue;
-    if (!Array.isArray(value[name]) || value[name].length > maxItems || value[name].some((entry) => !bounded(entry, maxLength))) throw new Error(label + "." + name + " is invalid.");
-  }
-}
 
 function describeGateAcceptanceConflict(gate, acceptance) {
   const render = (value) => {
@@ -657,7 +401,6 @@ function validateRunCall(key, params, label, fingerprints) {
   if (Object.prototype.hasOwnProperty.call(params, "clarify")) throw new Error(label + " does not support clarify UI.");
   if (params.worktree !== undefined && typeof params.worktree !== "boolean") throw new Error(label + " worktree must be true or false.");
   if (params.baseRef !== undefined && (typeof params.baseRef !== "string" || !validGitRef(params.baseRef))) throw new Error(label + " baseRef must be a valid Git ref: use HEAD or a supported named ref (for example, refs/heads/main). Full 40/64-character commit IDs and revision expressions are unsupported.");
-  validateLaneMetadata(params.lane, label + " lane", key);
   if (params.gate !== undefined && (typeof params.gate !== "string" || !params.gate.trim())) throw new Error(label + " gate must be a non-empty command string.");
   if (params.gate !== undefined && params.acceptance !== undefined && params.acceptance !== false) throw new Error(label + " gate cannot be combined with acceptance; use one gate command or acceptance.verify." + describeGateAcceptanceConflict(params.gate, params.acceptance));
   if (params.gate !== undefined && params.resume !== undefined) throw new Error(label + " gate is not supported with retained resume.");
@@ -723,7 +466,7 @@ function runsAllItemThenableInfo(item, index) {
 
 let warnedPermissiveRunsAll = false;
 
-function launchRunsAll(items, generatedLaneKeys) {
+function launchRunsAll(items) {
   if (!Array.isArray(items)) throw new Error("runs.all(items) requires an array.");
   const anyThenable = items.some((item, index) => runsAllItemThenableInfo(item, index) !== null);
   if (anyThenable) return launchRunsAllPermissive(items);
@@ -739,7 +482,7 @@ function launchRunsAll(items, generatedLaneKeys) {
   }
   runFingerprints = fingerprints;
   const batch = { id: "batch-" + (++nextCallId), calls };
-  const launched = calls.map(({ key, params }, index) => runHostCall(key, params, true, batch, generatedLaneKeys?.[index]));
+  const launched = calls.map(({ key, params }) => runHostCall(key, params, true, batch));
   return { calls, launched };
 }
 
@@ -777,13 +520,10 @@ const runs = Object.freeze({
     return trackRunObservation([{ key, operation: "run", callId: launched.callId }], launched.promise.then(decorateWorkflowChildResult));
   },
   all(items) {
-    const { calls, launched } = launchRunsAll(items);
-    return trackRunObservation(launched.map(({ key, callId }) => ({ key, operation: "run", callId })), trackPromiseCombinator(launched.map(({ promise }) => promise), (values) => Promise.all(values).then((results) => wrapRunsAllResults(results.map(decorateWorkflowChildResult), calls.map(({ key }) => key)))));
-  },
-  lanes(laneSpecs) {
-    return runLanes(laneSpecs);
-  },
-  host(key, params) {
+	const { calls, launched } = launchRunsAll(items);
+	return trackRunObservation(launched.map(({ key, callId }) => ({ key, operation: "run", callId })), trackPromiseCombinator(launched.map(({ promise }) => promise), (values) => Promise.all(values).then((results) => wrapRunsAllResults(results.map(decorateWorkflowChildResult), calls.map(({ key }) => key)))));
+	},
+	host(key, params) {
     validateHostCommand(key, params);
     return hostCall("host", { key, params }, { key, operation: "host" });
   },
@@ -1062,7 +802,6 @@ parentPort.on("message", async (message) => {
 export interface WorkflowScriptChildResult {
 	key: string;
 	ok: boolean;
-	lane?: import("../shared/types.ts").WorkflowLaneMetadata;
 	terminalOutcome?: import("../shared/types.ts").WorkflowTerminalOutcome;
 	stopped?: boolean;
 	/** Canonical child agent name when launch resolution produced one. */
@@ -1096,26 +835,7 @@ export interface WorkflowScriptTraceEntry {
 	phase?: string;
 	label?: string;
 	error?: string;
-	/** Internal provenance for a generated runs.lanes child key. */
-	generatedLaneKey?: string;
-	lane?: import("../shared/types.ts").WorkflowLaneMetadata;
 	warning?: string;
-}
-
-/** Bounded plan metadata emitted when a workflow materializes a runs.lanes graph. */
-export interface WorkflowLanePlanStage {
-	key: string;
-	generatedKey: string;
-	agent?: string;
-	phase?: string;
-	label?: string;
-	outputName?: string;
-	structured?: boolean;
-}
-
-export interface WorkflowLanePlan {
-	key: string;
-	stages: WorkflowLanePlanStage[];
 }
 
 export interface WorkflowSteerOptions {
@@ -1205,7 +925,6 @@ export interface RunWorkflowScriptOptions {
 	};
 	registerStopChild?: (stop: ((key: string, message?: string) => boolean) | undefined) => void;
 	onTrace?: (trace: WorkflowScriptTraceEntry[]) => void;
-	onLanePlan?: (lanes: WorkflowLanePlan[]) => void;
 	onEmit?: (emits: unknown[]) => void;
 	onChildSettled?: (notification: WorkflowChildSettledNotification) => void;
 }
@@ -1510,7 +1229,7 @@ function literalString(node: unknown): string | undefined {
 	return undefined;
 }
 
-function directRunsCall(node: unknown, method: "run" | "all" | "host" | "lanes"): boolean {
+function directRunsCall(node: unknown, method: "run" | "all" | "host"): boolean {
 	if (!astNode(node) || node.type !== "CallExpression" || !astNode(node.callee) || node.callee.type !== "MemberExpression") return false;
 	const property = node.callee.computed === true ? literalString(node.callee.property) : astNode(node.callee.property) && node.callee.property.type === "Identifier" ? node.callee.property.name : undefined;
 	return property === method && astNode(node.callee.object) && node.callee.object.type === "Identifier" && node.callee.object.name === "runs";
@@ -1650,7 +1369,7 @@ function directRunsAllKeys(call: AstNode): Array<{ key: string; node: AstNode }>
 function containsWorkflowLaunch(node: unknown): boolean {
 	let found = false;
 	walkAst(node, (candidate) => {
-		if (directRunsCall(candidate, "run") || directRunsCall(candidate, "all") || directRunsCall(candidate, "lanes")) found = true;
+		if (directRunsCall(candidate, "run") || directRunsCall(candidate, "all")) found = true;
 	});
 	return found;
 }
@@ -1701,7 +1420,7 @@ function staticWorkflowLaunchPlan(workflowBody: AstNode): { keys: string[]; dyna
 		const args = Array.isArray(call.arguments) ? call.arguments : [];
 		let nestedLaunch = false;
 		for (const argument of args) walkAst(argument, (node) => {
-			if (node !== call && (directRunsCall(node, "run") || directRunsCall(node, "all") || directRunsCall(node, "lanes"))) nestedLaunch = true;
+			if (node !== call && (directRunsCall(node, "run") || directRunsCall(node, "all"))) nestedLaunch = true;
 		});
 		if (nestedLaunch) {
 			dynamic = true;
@@ -1892,7 +1611,7 @@ function resolveWorkflowParserEntry(): string {
 	}
 }
 
-const AUTO_RESUME_PARAM_KEYS = ["acceptance", "agentContract", "baseRef", "index", "label", "lane", "maxRuntimeMs", "output", "outputMode", "outputSchema", "phase", "skill", "skills", "task", "timeoutMs", "toolBudget", "worktree"] as const;
+const AUTO_RESUME_PARAM_KEYS = ["acceptance", "agentContract", "baseRef", "index", "label", "maxRuntimeMs", "output", "outputMode", "outputSchema", "phase", "skill", "skills", "task", "timeoutMs", "toolBudget", "worktree"] as const;
 
 function isZeroUsage(usage: unknown): boolean {
 	if (!isRecord(usage)) return false;
@@ -1973,7 +1692,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 	const trace: WorkflowScriptTraceEntry[] = [];
 	const children = new Map<string, WorkflowScriptChildResult>();
 	const childOrder: string[] = [];
-	const launches = new Map<string, { fingerprint: string; promise: Promise<WorkflowScriptChildResult>; observed: boolean; generatedLaneKey?: string }>();
+	const launches = new Map<string, { fingerprint: string; promise: Promise<WorkflowScriptChildResult>; observed: boolean }>();
 	const steers = new Map<number, { key: string; promise: Promise<WorkflowSteerResult>; observed: boolean }>();
 	const hostCalls = new Map<number, { key: string; promise: Promise<WorkflowHostCommandResult>; observed: boolean }>();
 	const stoppedLaunches = new Set<string>();
@@ -2004,13 +1723,6 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 			options.onTrace?.([...trace]);
 		} catch (error) {
 			console.error("Workflow onTrace callback failed:", error);
-		}
-	};
-	const lanePlanChanged = (lanes: WorkflowLanePlan[]) => {
-		try {
-			options.onLanePlan?.(lanes);
-		} catch (error) {
-			console.error("Workflow onLanePlan callback failed:", error);
 		}
 	};
 	const hostStepChanged = (hostStep: HostStepNode) => {
@@ -2045,7 +1757,6 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 			...(started?.agent ? { agent: started.agent } : {}),
 			...(started?.phase ? { phase: started.phase } : {}),
 			...(started?.label ? { label: started.label } : {}),
-			...(started?.generatedLaneKey ? { generatedLaneKey: started.generatedLaneKey } : {}),
 			error: message,
 		});
 		traceChanged();
@@ -2147,7 +1858,6 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 					...(started?.agent ? { agent: started.agent } : {}),
 					...(started?.phase ? { phase: started.phase } : {}),
 					...(started?.label ? { label: started.label } : {}),
-					...(started?.generatedLaneKey ? { generatedLaneKey: started.generatedLaneKey } : {}),
 					error: error.message,
 				});
 			}
@@ -2170,10 +1880,6 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 		});
 		worker.on("message", (message: Record<string, unknown>) => {
 			if (settled) return;
-			if (message.type === "lanePlan" && Array.isArray(message.lanes)) {
-				lanePlanChanged(message.lanes as WorkflowLanePlan[]);
-				return;
-			}
 			if (message.type === "emit") {
 				try {
 					assertWorkflowJsonValue(message.value, "emit");
@@ -2377,9 +2083,6 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 			}
 			const params = message.args.params;
 			if (!isRecord(params)) return respond(Promise.reject(new Error(`runs.run('${key}', params) requires a params object.`)));
-			const generatedLaneKey = typeof message.args.generatedLaneKey === "string" && KEY_PATTERN.test(message.args.generatedLaneKey) && key.startsWith(`${message.args.generatedLaneKey}.`)
-				? message.args.generatedLaneKey
-				: undefined;
 			const collectFailure = message.args.collectFailure === true;
 			const callObserved = observedRunCalls.delete(message.callId);
 			const deliver = (promise: Promise<WorkflowScriptChildResult>) => collectFailure
@@ -2399,7 +2102,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 			if (existing) {
 				if (existing.fingerprint !== fingerprint) return respond(Promise.reject(new Error(`Duplicate workflow key '${key}' used with incompatible launch params.`)));
 				if (callObserved) existing.observed = true;
-				trace.push({ operation: "run", key, state: "reused", ...workflowStringMetadata(params), ...(existing.generatedLaneKey ? { generatedLaneKey: existing.generatedLaneKey } : {}) });
+				trace.push({ operation: "run", key, state: "reused", ...workflowStringMetadata(params) });
 				traceChanged();
 				return respond(deliver(existing.promise), `runs.run('${key}') result`, (error) => children.set(key, responseBoundaryFailure(key, error)));
 			}
@@ -2506,7 +2209,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 					const autoResumeParams = setupAbortResumeParams(params, result, childSignal);
 					if (!autoResumeParams) return result;
 					resolvedResumeLineage = [...new Set([...(resolvedResumeLineage ?? []), result.runId!])];
-					trace.push({ operation: "run", key, state: "started", ...workflowStringMetadata(autoResumeParams), ...(generatedLaneKey ? { generatedLaneKey } : {}), phase: "auto-resume", runId: result.runId });
+					trace.push({ operation: "run", key, state: "started", ...workflowStringMetadata(autoResumeParams), phase: "auto-resume", runId: result.runId });
 					traceChanged();
 					return options.launch(key, autoResumeParams, childSignal, { admitted: true, batch: batch !== undefined });
 				} finally {
@@ -2526,7 +2229,7 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				children.set(key, normalized);
 				recordAcceptanceRecoveryBarrier(key, normalized);
 				const state = normalized.ok ? "completed" : normalized.stopped ? "stopped" : normalized.detached ? "detached" : "failed";
-				trace.push({ operation: "run", key, state, durationMs: Date.now() - startedAt, ...workflowStringMetadata(params), ...(generatedLaneKey ? { generatedLaneKey } : {}), ...(normalized.agent ? { agent: normalized.agent } : {}), ...(normalized.runId ? { runId: normalized.runId } : {}), ...(!normalized.ok ? { error: normalized.error ?? normalized.output } : {}) });
+				trace.push({ operation: "run", key, state, durationMs: Date.now() - startedAt, ...workflowStringMetadata(params), ...(normalized.agent ? { agent: normalized.agent } : {}), ...(normalized.runId ? { runId: normalized.runId } : {}), ...(!normalized.ok ? { error: normalized.error ?? normalized.output } : {}) });
 				traceChanged();
 				notifyChildSettled(key, normalized);
 				return normalized;
@@ -2536,14 +2239,14 @@ export async function runWorkflowScript(options: RunWorkflowScriptOptions): Prom
 				childStopControllers.delete(key);
 				if (stoppedLaunches.has(key)) return children.get(key) ?? { ...failure, stopped: true };
 				children.set(key, failure);
-				trace.push({ operation: "run", key, state: "failed", durationMs: Date.now() - startedAt, ...workflowStringMetadata(params), ...(generatedLaneKey ? { generatedLaneKey } : {}), error: text });
+				trace.push({ operation: "run", key, state: "failed", durationMs: Date.now() - startedAt, ...workflowStringMetadata(params), error: text });
 				traceChanged();
 				notifyChildSettled(key, failure);
 				return failure;
 			});
-			launches.set(key, { fingerprint, promise, observed: callObserved, ...(generatedLaneKey ? { generatedLaneKey } : {}) });
+			launches.set(key, { fingerprint, promise, observed: callObserved });
 			childOrder.push(key);
-			trace.push({ operation: "run", key, state: "started", ...workflowStringMetadata(params), ...(generatedLaneKey ? { generatedLaneKey } : {}) });
+			trace.push({ operation: "run", key, state: "started", ...workflowStringMetadata(params) });
 			traceChanged();
 			respond(deliver(promise), `runs.run('${key}') result`, (error) => children.set(key, responseBoundaryFailure(key, error)));
 		});

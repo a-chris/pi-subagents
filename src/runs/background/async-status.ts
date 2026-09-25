@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { formatDuration, formatModelThinking, formatTokens, shortenPath } from "../../shared/formatters.ts";
 import { previewDisplayText } from "../../shared/display-text.ts";
 import { formatActivityLabel, formatParallelOutcome } from "../../shared/status-format.ts";
-import { type ActivityState, type AsyncJobStep, type AsyncParallelGroupStatus, type AsyncStatus, type CostSummary, type Details, type HostStepNode, type HostStepState, type LaunchResolvedChildExtensions, type RuntimeAcknowledgedChildExtensions, type NestedRunSummary, type SteeringStatus, type SubagentRunMode, type TimeoutRecoveryProjection, type TokenUsage, type TurnBudgetState, type UsageBudgetState, type WorktreeNaming, type WorkflowPreflight, type WorkflowGraphSnapshot } from "../../shared/types.ts";
+import { type ActivityState, type AsyncJobStep, type AsyncParallelGroupStatus, type AsyncStatus, type CostSummary, type Details, type HostStepNode, type HostStepState, type LaunchResolvedChildExtensions, type RuntimeAcknowledgedChildExtensions, type NestedRunSummary, type SteeringStatus, type SubagentRunMode, type TimeoutRecoveryProjection, type TokenUsage, type TurnBudgetState, type WorktreeNaming, type WorkflowPreflight, type WorkflowGraphSnapshot } from "../../shared/types.ts";
 import type { ResolvedSubagentCapabilityCeiling, SubagentCapabilityAudit } from "../shared/capability-ceiling.ts";
 import { readStatus } from "../../shared/utils.ts";
 import { attachRootChildrenToSteps, buildNestedRouteIndex, findNestedRouteForRootId, type NestedRoute, projectNestedEvents } from "../shared/nested-events.ts";
@@ -20,7 +20,6 @@ import { asyncStatusChildIdentity } from "../shared/child-identity.ts";
 import { parseWorkflowChildSummary } from "../../workflows/workflow-child-summary.ts";
 import { assertWorkflowGraphHostSteps, hostStepReportName, hostStepVerdictLabel, validHostStepNodes } from "../shared/host-step-status.ts";
 import { projectAsyncWorkflowRows } from "../shared/async-status-projection.ts";
-import { validateAsyncStatusLaneMetadata } from "../shared/lane-metadata.ts";
 import { formatWorkflowPreflightPlanSummary, formatWorkflowPreflightWarningSummary } from "../../workflows/workflow-preflight.ts";
 import { workflowGraphStageNodes } from "../shared/workflow-graph.ts";
 import { formatTimeoutRecoveryLines, projectTimeoutRecovery } from "../shared/mutation-evidence.ts";
@@ -39,7 +38,6 @@ interface AsyncRunStepSummary {
 	description?: string;
 	phase?: string;
 	workflowKey?: string;
-	lane?: AsyncJobStep["lane"];
 	worktreePath?: string;
 	branch?: string;
 	provider?: "native" | "worktrunk";
@@ -131,7 +129,6 @@ export interface AsyncRunSummary {
 	outputFile?: string;
 	totalTokens?: TokenUsage;
 	totalCost?: CostSummary;
-	usageBudget?: UsageBudgetState;
 	sessionFile?: string;
 	nestedChildren?: NestedRunSummary[];
 	nestedWarnings?: string[];
@@ -143,7 +140,6 @@ export interface AsyncRunSummary {
 	capabilityAudit?: SubagentCapabilityAudit;
 	parentWorkflowRunId?: string;
 	workflowKey?: string;
-	lane?: AsyncStatus["lane"];
 	workflow?: Details["workflow"];
 	workflowChildren?: Details["workflowChildren"];
 	preflight?: WorkflowPreflight;
@@ -290,7 +286,6 @@ function deriveAsyncActivityState(asyncDir: string, status: AsyncStatus): { acti
 
 function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string }, nestedWarnings: string[] = [], nestedRoute?: NestedRoute): AsyncRunSummary {
 	const statusPath = path.join(asyncDir, "status.json");
-	validateAsyncStatusLaneMetadata(status, `Invalid async status '${statusPath}'`);
 	const workflowChildren = parseWorkflowChildSummary(status.workflowChildren);
 	if (workflowChildren && workflowChildren.workflowRunId !== status.runId) throw new Error(`Invalid async status '${statusPath}': workflowChildren.workflowRunId does not match.`);
 	assertWorkflowGraphHostSteps(status.workflowGraph, statusPath, status.runId);
@@ -339,7 +334,6 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 			...(step.description ? { description: step.description } : {}),
 			...(step.phase ? { phase: step.phase } : {}),
 			...(step.workflowKey ? { workflowKey: step.workflowKey } : {}),
-			...(step.lane ? { lane: step.lane } : {}),
 			...(step.worktreePath ? { worktreePath: step.worktreePath } : {}),
 			...(step.branch ? { branch: step.branch } : {}),
 			...(step.provider ? { provider: step.provider } : {}),
@@ -444,7 +438,6 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 		...(status.capabilityAudit ? { capabilityAudit: status.capabilityAudit } : {}),
 		...(status.parentWorkflowRunId ? { parentWorkflowRunId: status.parentWorkflowRunId } : {}),
 		...(status.workflowKey ? { workflowKey: status.workflowKey } : {}),
-		...(status.lane ? { lane: status.lane } : {}),
 		...(status.workflow ? { workflow: status.workflow } : {}),
 		...(workflowChildren ? { workflowChildren } : {}),
 		...(status.preflight ? { preflight: status.preflight } : {}),
@@ -452,7 +445,6 @@ function statusToSummary(asyncDir: string, status: AsyncStatus & { cwd?: string 
 		...(status.outputFile ? { outputFile: status.outputFile } : {}),
 		...(status.totalTokens ? { totalTokens: status.totalTokens } : {}),
 		...(status.totalCost ? { totalCost: status.totalCost } : {}),
-		...(status.usageBudget ? { usageBudget: status.usageBudget } : {}),
 		...(status.sessionFile ? { sessionFile: status.sessionFile } : {}),
 	};
 }
@@ -637,7 +629,6 @@ function formatStepLine(step: AsyncRunStepSummary): string {
 	if (modelThinking) parts.push(modelThinking);
 	if (step.durationMs !== undefined) parts.push(formatDuration(step.durationMs));
 	if (step.tokens) parts.push(`${formatTokens(step.tokens.total)} tok`);
-	if (step.lane) parts.push(`lane ${step.lane.key}`);
 	if (step.worktreePath) parts.push(`worktree ${shortenPath(step.worktreePath)} · branch ${step.branch ?? "unknown"}${step.provider ? ` · provider ${step.provider}` : ""}`);
 	return parts.join(" | ");
 }
@@ -718,8 +709,7 @@ function formatRunHeader(run: AsyncRunSummary): string {
 	const activity = formatActivityFacts(run);
 	const pending = run.pendingAppends ? ` | ${run.pendingAppends} pending append${run.pendingAppends === 1 ? "" : "s"}` : "";
 	const context = contextModeLabel(run.context);
-	const lane = run.lane ? ` | lane ${run.lane.key}` : "";
-	return `${run.id} | ${run.state}${activity ? ` | ${activity}` : ""} | ${run.mode}${context ? ` ${context}` : ""} | ${stepLabel}${pending}${lane} | ${cwd}`;
+	return `${run.id} | ${run.state}${activity ? ` | ${activity}` : ""} | ${run.mode}${context ? ` ${context}` : ""} | ${stepLabel}${pending} | ${cwd}`;
 }
 
 export function formatAsyncRunList(runs: AsyncRunSummary[], heading = "Active async runs"): string {

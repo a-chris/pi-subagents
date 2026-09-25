@@ -56,8 +56,6 @@ import {
 	type ToolBudgetConfig,
 	type SubagentRunMode,
 	type SteeringRecoveryDescriptor,
-	type WorkflowLaneMetadata,
-	type UsageBudgetConfig,
 	DIRS,
 	SUBAGENT_ASYNC_STARTED_EVENT,
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
@@ -72,7 +70,6 @@ import { inheritedChildRuntime } from "../shared/child-launch.ts";
 import { resultFilePath } from "./result-files.ts";
 import { updateActiveRunIndex } from "./active-run-index.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
-import { usageBudgetState } from "../shared/usage-budget.ts";
 import type { ImportedAsyncRoot } from "./chain-root-attachment.ts";
 import type { SessionLeaseRequest } from "../shared/session-lease.ts";
 import { finalizeProcessTerminal, initializeProcessTerminal, readProcessTerminal } from "./process-terminal.ts";
@@ -83,7 +80,6 @@ import { assertAgentAllowedByCapabilityCeiling, intersectSubagentCapabilityCeili
 import { resolveLaunchBinding } from "../../shared/launch-contract.ts";
 import { resolvePermissionRules, type PermissionConfig } from "../shared/permissions.ts";
 import { normalizeExtensionBindings, omitExtensionBindingsEnv, type ExtensionBindings } from "../shared/extension-bindings.ts";
-import { assertWorkflowLaneKey, normalizeWorkflowLaneMetadata } from "../shared/lane-metadata.ts";
 import { resolveRequiredChildExtensions, type RequiredChildExtensionSnapshot } from "../../shared/required-child-extensions.ts";
 
 const require = nodeModule.createRequire(import.meta.url);
@@ -222,7 +218,6 @@ interface AsyncChainParams {
 	fast?: boolean;
 	timeoutMs?: number;
 	toolBudget?: ResolvedToolBudget;
-	usageBudget?: UsageBudgetConfig;
 	configToolBudget?: ResolvedToolBudget;
 	/** Optional per-call hard toolTimeoutMs override (highest precedence). */
 	callToolTimeoutMs?: number;
@@ -237,7 +232,6 @@ interface AsyncChainParams {
 	runFanoutBudget?: RunFanoutBudgetDescriptor;
 	parentWorkflowRunId?: string;
 	workflowKey?: string;
-	lane?: WorkflowLaneMetadata;
 	activeAsyncCapacity?: ActiveAsyncCapacityHandle;
 }
 
@@ -296,7 +290,6 @@ interface AsyncSingleParams {
 	/** Steer the child to checkpoint and stop this many ms before the run deadline (resolved call param ?? config). */
 	checkpointBeforeDeadlineMs?: number;
 	toolBudget?: ResolvedToolBudget | ToolBudgetConfig;
-	usageBudget?: UsageBudgetConfig;
 	configToolBudget?: ResolvedToolBudget;
 	/** Global config.toolTimeoutMs (third precedence, after agent frontmatter). */
 	configToolTimeoutMs?: number;
@@ -308,7 +301,6 @@ interface AsyncSingleParams {
 	runFanoutBudget?: RunFanoutBudgetDescriptor;
 	parentWorkflowRunId?: string;
 	workflowKey?: string;
-	lane?: WorkflowLaneMetadata;
 	workflowAwaitAsync?: boolean;
 	activeAsyncCapacity?: ActiveAsyncCapacityHandle;
 	externalJobFollowUp?: {
@@ -1430,7 +1422,6 @@ export function executeAsyncChain(
 	}
 	const { steps, runnerCwd, workflowGraph, eventChain } = built;
 	const deadlineAt = params.timeoutMs !== undefined ? Date.now() + params.timeoutMs : undefined;
-	const initialUsageBudget = usageBudgetState(params.usageBudget, undefined);
 	const initialStatusSteps = eventChain.flatMap((step) => isParallelStep(step)
 		? step.parallel.map((task) => ({ agent: task.agent, ...(statusStepDescription(task.task) ? { description: statusStepDescription(task.task) } : {}), ...(task.label ? { label: task.label } : {}), ...(task.as ? { outputName: task.as } : {}), status: "pending" as const }))
 		: isDynamicParallelStep(step)
@@ -1476,7 +1467,6 @@ export function executeAsyncChain(
 				worktreeBranchPrefix,
 				controlConfig,
 				toolBudget: params.toolBudget,
-				usageBudget: params.usageBudget,
 				resultMode,
 				dynamicFanoutMaxItems: params.dynamicFanoutMaxItems,
 				timeoutMs: params.timeoutMs,
@@ -1621,7 +1611,6 @@ export function executeAsyncChain(
 			asyncDir,
 			...(sessionRoot ? { sessionRoot } : {}),
 			...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}),
-			...(initialUsageBudget ? { usageBudget: initialUsageBudget } : {}),
 			...(capabilityCeiling ? { capabilityCeiling } : {}),
 			...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}),
 			...(params.workflowKey ? { workflowKey: params.workflowKey } : {}),
@@ -1637,7 +1626,7 @@ export function executeAsyncChain(
 
 	return {
 		content: [{ type: "text", text: formatAsyncStartedMessage(`Async ${resultMode}: ${chainDesc} [${id}]`, ctx.interactive === true) }],
-		details: { mode: resultMode, runId: id, results: [], asyncId: id, asyncDir, workflowGraph, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}), ...(params.workflowKey ? { workflowKey: params.workflowKey } : {}), ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}), ...(initialUsageBudget ? { usageBudget: initialUsageBudget } : {}) },
+		details: { mode: resultMode, runId: id, results: [], asyncId: id, asyncDir, workflowGraph, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}), ...(params.workflowKey ? { workflowKey: params.workflowKey } : {}), ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs, deadlineAt } : {}), ...(params.toolBudget ? { toolBudget: params.toolBudget } : {}) },
 	};
 }
 
@@ -1673,13 +1662,6 @@ export function executeAsyncSingle(
 		controlConfig,
 		nestedRoute,
 	} = params;
-	let lane: WorkflowLaneMetadata | undefined;
-	try {
-		lane = normalizeWorkflowLaneMetadata(params.lane, "lane");
-		assertWorkflowLaneKey(lane, params.workflowKey, "lane");
-	} catch (error) {
-		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
-	}
 	const task = params.task ?? "";
 	let extensionBindings: ExtensionBindings | undefined;
 	try {
@@ -1830,7 +1812,6 @@ export function executeAsyncSingle(
 	});
 	if (resolvedToolTimeout.error) return formatAsyncStartError("single", resolvedToolTimeout.error);
 	const toolTimeoutMs = resolvedToolTimeout.toolTimeoutMs;
-	const initialUsageBudget = usageBudgetState(params.usageBudget, undefined);
 	const resolvedSessionDir = params.sessionDir ?? (sessionRoot ? path.join(sessionRoot, `async-${id}`) : undefined);
 	const structuredOutput = params.structuredOutputSchema
 		? createStructuredOutputRuntime(params.structuredOutputSchema, path.join(asyncDir, "structured-output"), { acceptanceReport: resolveAcceptanceReportMode(params.acceptance) })
@@ -1917,7 +1898,6 @@ export function executeAsyncSingle(
 	const recoveryDescriptor: SteeringRecoveryDescriptor = {
 		...(ctx.modelResponseAliases ? { modelResponseAliases: ctx.modelResponseAliases } : {}),
 		version: 1,
-		...(lane ? { lane } : {}),
 		launchContractDigest,
 		...(extensionBindings ? { extensionBindings } : {}),
 		...(requiredExtensions.length > 0 ? { requiredExtensions } : {}),
@@ -2038,7 +2018,6 @@ export function executeAsyncSingle(
 						...(params.structuredOutputSchema ? { structuredOutputSchema: params.structuredOutputSchema } : {}),
 						...(resolvedToolBudget.budget ? { toolBudget: resolvedToolBudget.budget } : {}),
 						...(params.worktree === true ? { worktree: true } : {}),
-						...(lane ? { lane } : {}),
 					},
 				],
 				resultPath: params.parentWorkflowRunId !== undefined && (params.revivalLease !== undefined || params.workflowAwaitAsync === true)
@@ -2070,7 +2049,6 @@ export function executeAsyncSingle(
 				toolTimeoutMs,
 				checkpointBeforeDeadlineMs: params.checkpointBeforeDeadlineMs,
 				toolBudget: params.toolBudget,
-				usageBudget: params.usageBudget,
 				resultMode: "single",
 				launchContractDigest,
 				launchResolvedExtensions,
@@ -2078,7 +2056,6 @@ export function executeAsyncSingle(
 				hostAvailableBuiltins,
 				...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}),
 				...(params.workflowKey ? { workflowKey: params.workflowKey } : {}),
-				...(lane ? { lane } : {}),
 				...(params.revivalLease ? { revivalLease: params.revivalLease } : {}),
 				nestedRoute: nestedRoute ?? inheritedNestedRoute,
 				nestedSelf: inheritedNestedRoute && nestedAddress ? {
@@ -2101,8 +2078,7 @@ export function executeAsyncSingle(
 				lastUpdate: initialStatusAt,
 				currentStep: 0,
 				chainStepCount: 1,
-				...(lane ? { lane } : {}),
-				steps: [{ agent, status: "pending", ...(lane ? { lane } : {}), ...(model ? { model } : {}), ...(contextLimit !== undefined ? { contextLimit } : {}) }],
+				steps: [{ agent, status: "pending", ...(model ? { model } : {}), ...(contextLimit !== undefined ? { contextLimit } : {}) }],
 			},
 			path.join(asyncDir, "status.json"),
 			(proof) => emitProcessTerminalEvent(ctx, proof),
@@ -2178,7 +2154,6 @@ export function executeAsyncSingle(
 			...(params.parentWorkflowRunId ? { parentWorkflowRunId: params.parentWorkflowRunId } : {}),
 			...(params.workflowKey ? { workflowKey: params.workflowKey } : {}),
 			...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}),
-			...(initialUsageBudget ? { usageBudget: initialUsageBudget } : {}),
 			...(capabilityCeiling ? { capabilityCeiling } : {}),
 			nestedRoute,
 		});
@@ -2186,7 +2161,7 @@ export function executeAsyncSingle(
 
 	return {
 		content: [{ type: "text", text: formatAsyncStartedMessage(`Async: ${agent} [${id}]`, ctx.interactive === true) }],
-		details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, launchContractDigest, launchResolvedExtensions, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.toolBudget ? { toolBudget: resolvedToolBudget.budget ?? params.toolBudget } : {}), ...(initialUsageBudget ? { usageBudget: initialUsageBudget } : {}) } as Details,
+		details: { mode: "single", runId: id, results: [], asyncId: id, asyncDir, launchContractDigest, launchResolvedExtensions, ...(capabilityCeiling ? { capabilityCeiling } : {}), ...(params.context ? { context: params.context } : {}), ...(timeoutMs !== undefined ? { timeoutMs, deadlineAt } : {}), ...(params.toolBudget ? { toolBudget: resolvedToolBudget.budget ?? params.toolBudget } : {}) } as Details,
 	};
 	};
 	return spawnResultOrPromise instanceof Promise ? spawnResultOrPromise.then(finishSpawnResult) : finishSpawnResult(spawnResultOrPromise);

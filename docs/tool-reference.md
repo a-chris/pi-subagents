@@ -49,63 +49,22 @@ The host resolves the script and authority internally and records bounded proven
 ` }
 ```
 
-### Parallel sequential lanes
-
-Use `runs.lanes(lanes)` inside a `workflowScript` when several independent lanes each have ordered stages. This helper composes the existing workflow child runner; it does not add a top-level `lanes` parameter or a second persistence/cleanup system.
-
-```js
-{ workflowScript: `
-  const board = await runs.lanes([
-    { key: "api", stages: [
-      { key: "writer", agent: "worker", task: "Implement the API change" },
-      { key: "challenge", resume: "previous", task: "Challenge the implementation" },
-      { key: "review", agent: "reviewer", task: "Review the API lane" }
-    ] },
-    { key: "ui", stages: [
-      { key: "writer", agent: "worker", task: "Implement the UI change" },
-      { key: "review", agent: "reviewer", task: "Review the UI lane" }
-    ] }
-  ]);
-  return board.map((lane) => ({
-    key: lane.key,
-    state: lane.state,
-    failedStage: lane.failedStage,
-    stages: lane.stages.map((stage) => ({
-      key: stage.key,
-      state: stage.state,
-      ok: stage.ok,
-      runId: stage.runId,
-      outputReference: stage.outputReference,
-      verdict: stage.verdict
-    }))
-  }));
-` }
-```
-
-The first stage of each lane is launched by one existing `runs.all(...)` batch. Later stages run in lane order. Set `resume: "previous"` on a later stage to continue the preceding retained child; the helper requires that child’s returned `runId` and delegates to the existing resume checks. Stage keys are local to the lane, and generated child keys are `<lane>.<stage>`.
-
-The complete plain-JSON inventory is validated before the first launch (maximum 32 lanes, 16 stages per lane, 64 total stages, and 64 KiB canonical JSON). A failed, stopped, or detached stage blocks only its lane and marks later stages `skipped`; an explicit `structuredOutput.verdict === "blocked"` has the same effect. Reviewer prose is not parsed. The bounded board returns lane/stage keys, state, `ok`, run ids, explicit output references, bounded errors, and optional verdicts, not transcripts. Use raw `runs.run(...)`/`runs.all(...)` for conditional or rolling workflows.
-
 ## Parameter reference
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `agent` | string | - | One direct child or agent-management target. Workflow child agents are set inside `runs.run` or `runs.all`. |
 | `task` | string | agent default | Direct child's task; requires `agent`, excludes `action` and workflow inputs. `agent` may also select a management target. |
-| `action` | string | - | Offline workflow `validate`, agent management (including `guide`, `children.list`, and `refine`/`refine.show`/`refine.rollback`), lane evidence (`lane.status`, `lane.recordMerge`, `lane.recordSupersession`), mission (`mission.create/list/show/update/resolve-decision/attach-run/close`), Inspect actions (`inspector.command/open/status/close`), status/control, plan-only `worktree.cleanup`, schedule, watchdog, or doctor action. |
+| `action` | string | - | Offline workflow `validate`, agent management (including `guide`, `children.list`, and `refine`/`refine.show`/`refine.rollback`), mission (`mission.create/list/show/update/resolve-decision/attach-run/close`), Inspect actions (`inspector.command/open/status/close`), status/control, plan-only `worktree.cleanup`, schedule, watchdog, or doctor action. |
 | `topic` | `overview \| workflows \| agents \| missions \| observability \| tool-reference \| configuration \| models \| watchdog \| extension-api` | `overview` | Packaged guide topic for `action: "guide"`. |
 | `config` | object/string | - | Agent config for management create/update. |
 | `context` | `fresh \| fork \| summary` | per-agent `defaultContext`, else `fresh` | Explicit `fresh`, `fork`, or `summary` overrides every workflow child. When omitted, each agent's declared `defaultContext` resolves per child, else `fresh`; implicit fork/summary fall back to fresh without a persisted parent session and leaf. Explicit fork is strict. `summary` distills the parent session into a role-directed brief (see [`contextBrief`](agents.md)) prepended to the child task; generation failures fall back to fresh. Packaged `worker` and `reviewer` default to `summary`; `oracle` defaults to `fork`; the rest default to `fresh`. |
 | `model` | string | agent default | Call `{action:"models"}` first and copy an exact `provider/id`; bare ids resolve only if unique, and agent names are not model ids. A suffix such as `provider/id:high` (`off/minimal/low/medium/high/xhigh/max`) overrides agent thinking. The `thinking` field is only for `watchdog.configure`, ignored on dispatch. |
 | `missionId` | string | - | Attach a workflow to an existing project mission instead of creating its default enclosing mission. |
 | `mission` | object/false | auto-create | Override the default enclosing mission with `{ title \| summary, objective?, goal?, budget?, labels? }`. Set exactly one non-empty `title` or `summary`; `objective` and `labels` are optional. `goal` may only be `true`, requires `budget.tokens`, and enables continuation notices. Pass `false` for an intentionally ephemeral workflow with no mission for it or its children and no `state` global. Explicit mission persistence failures are strict. |
-| `handoffPath` | string | - | Aggregate handoff manifest for `action: "worktree.discard"` or lane evidence actions, or optional explicit metadata for `action: "worktree.cleanup"`. |
+| `handoffPath` | string | - | Aggregate handoff manifest for `action: "worktree.discard"`, or explicit metadata for `action: "worktree.cleanup"`. |
 | `repo` | string | runtime cwd | Repository path for `action: "worktree.cleanup"`; plan mode only. The configured worktree base filters candidates by their per-project folder under it but never discovers them. |
-| `planId` | string | - | Reserved for a future `worktree.cleanup` apply action; rejected by the current plan-only action. |
 | `mode` | `steer \| follow_up \| auto \| plan \| apply` | - | Delivery mode for `action: "steer"`; `worktree.cleanup` currently accepts `plan` only. Apply/removal is reserved for a later change. |
-| `laneId` | string | - | Exact `runId` stored in the handoff manifest for `lane.status`, `lane.recordMerge`, or `lane.recordSupersession`. |
-| `merge` | object | - | Attested merge evidence for `lane.recordMerge`; requires a positive PR number, full reviewed/merge SHAs, tree-equivalence and post-merge-check statuses, attestor, and timestamp. |
-| `supersession` | object | - | Attested replacement-lane evidence for `lane.recordSupersession`; requires a different replacement lane id, attestor, and timestamp. |
 | `focus` | boolean | false | Focus the host inspector pane for `action: "inspector.open"`; not a standalone action. `inspector.command` is read-only and opens a raw host inspector pane, not an attached session. Panes open in the background unless you set `focus: true`. |
 | `view` | `fleet \| transcript` | - | Optional `status` view for the active fleet surface or transcript tail inspection. |
 | `lines` | number | `80` | Maximum transcript lines for `action: "status", view: "transcript"`; capped at 500. |
@@ -119,7 +78,6 @@ The complete plain-JSON inventory is validated before the first launch (maximum 
 | `toolTimeoutMs` | number | fast-tool default | Optional positive hard per-tool-call deadline in milliseconds. Precedence: call value → agent frontmatter → config → `PI_SUBAGENT_TOOL_TIMEOUT_MS`. The timer starts on `tool_execution_start`, clears on the matching `tool_execution_end`, and terminates the run with `timedOut: true` if the tool remains open. When omitted, known-fast built-in tools get a five-minute default; long-running tools get attention notices but no hard default. It never extends the run deadline; `bg_wait` is exempt. |
 | `checkpointBeforeDeadlineMs` | number | none | Async single-agent runs only. The runner requests that the child "checkpoint and stop" this many milliseconds before the run deadline (finish the current tool call, report changed files, build/test state, remaining work, commit/PR state; start no new work). This best-effort steer uses the normal steering lifecycle at the next tool boundary, so the receipt is visible in status and events; the ordinary deadline kill still applies. Precedence: call value → config `checkpointBeforeDeadlineMs`. Disarmed when the deadline leaves under one second before the checkpoint. |
 | `toolBudget` | object | none | Optional child tool-call budget `{ soft?, hard, block? }`. At `soft` the child is nudged to finalize. After `hard`, configured tools are blocked; `block` defaults to `read`, `grep`, `find`, and `ls`, while `"*"` blocks every tool call. Final assistant text is never blocked. |
-| `usageBudget` | object | none | Optional root-only reported-usage budget `{ tokens?: { soft?, hard }, costUsd?: { soft?, hard } }`. Soft limits are status-only. Hard limits prevent later child launches after reported usage is reconciled; already-running children are not stopped and no reservations are made. |
 | `cwd` | string | runtime cwd | Override working directory. With `machine`, the directory on that machine. |
 | `maxOutput` | object | 200KB, 5000 lines | Final output truncation limits. |
 | `artifacts` | boolean | true | Write debug artifacts. |
@@ -131,7 +89,7 @@ The complete plain-JSON inventory is validated before the first launch (maximum 
 
 ### Budget guidance for writers
 
-As a conservative orchestration policy, do not set a hard `toolBudget` or tight `usageBudget` on implementation workers, fix workers, reviewers with edit authority, or other mutation-capable children. A default tool budget blocks read/search tools rather than mutation tools, and reported usage has no reservation model, so neither tool-call counts nor token/cost totals measure whether a delivery slice is buildable or safe to hand off. Hard caps remain appropriate for explicitly read-only scouts, reviewers, and validators.
+As a conservative orchestration policy, do not set a hard `toolBudget` on implementation workers, fix workers, reviewers with edit authority, or other mutation-capable children. A default tool budget blocks read/search tools rather than mutation tools, , so tool-call counts and token/cost totals by themselves do not measure whether a delivery slice is buildable or safe to hand off. Hard caps remain appropriate for explicitly read-only scouts, reviewers, and validators.
 
 Bound writer work with a narrow task and an outer `timeoutMs` or `maxRuntimeMs` that leaves enough margin for the slice. An elapsed timeout is not a mutation-safe boundary and may still signal a child during tool work. Request a checkpoint after the current tool returns that records changed files, build/test state, and commit or PR state; for async single-agent runs, set `checkpointBeforeDeadlineMs`, otherwise steer by hand.
 
@@ -191,7 +149,7 @@ Completed workflow children from the current parent session stay addressable as 
 ` }
 ```
 
-Each workflow key identifies one result lane. Use a new stable workflow key for every distinct retained resume pass; same-key calls are reused only when launch parameters are identical, and incompatible parameters are rejected.
+Each workflow key identifies one workflow child. Use a new stable workflow key for every distinct retained resume pass; same-key calls are reused only when launch parameters are identical, and incompatible parameters are rejected.
 
 Inside `workflowScript`, `await runs.run(key, { resume, task })` waits for the revived child to finish and returns its completed output and new `runId`. Each resume can return a new retained run id, so loops must continue from the latest returned `runId`. Top-level `{ action: "resume" }` remains detached and returns a background-run receipt.
 
@@ -270,49 +228,13 @@ Rules:
 
 Use `schedule.create` with `workflowScript` or `workflowScriptPath`, not a direct child. `at` accepts a delay like `+10m` or an ISO timestamp with timezone; `every` accepts fixed intervals. `sessionOnly:true` binds restoration/execution to the creating session file; omitted/false is project-wide. Recurring `quiet:true` keeps successful automatic fires visible without a parent turn; failed, stopped or paused runs still wake the parent. One-shot `at` and manual `schedule.run` stay noisy unless that launch passes `quiet:true`. See [missions and schedules](missions.md#schedules) for examples and list/show/history/pause/resume/run/run-due/delete. Calendar selectors (`on`, `timezone`) and schedule mission attachment are deferred. `baseRef` resolves only at worktree allocation and still requires a clean source checkout.
 
-## Lane merge evidence and cleanup eligibility
-
-Lane evidence actions update an existing parallel handoff manifest at an explicit update boundary. They do not verify GitHub state, run Git commands, or remove worktrees. Pass the manifest path and its exact `runId` as `laneId`:
-
-```ts
-subagent({
-  action: "lane.recordMerge",
-  laneId: "<manifest-run-id>",
-  handoffPath: "/path/to/handoff.json",
-  merge: {
-    prNumber: 123,
-    reviewedHead: "<40-character-sha>",
-    mergeCommit: "<40-character-sha>",
-    treeEquivalent: true,
-    postMergeChecks: "recorded",
-    attestedBy: "operator",
-    attestedAt: "2026-08-27T16:23:00.000Z"
-  }
-})
-subagent({
-  action: "lane.recordSupersession",
-  laneId: "<manifest-run-id>",
-  handoffPath: "/path/to/handoff.json",
-  supersession: {
-    supersededBy: "<replacement-lane-id>",
-    attestedBy: "operator",
-    attestedAt: "2026-08-27T16:23:00.000Z"
-  }
-})
-subagent({ action: "lane.status", laneId: "<manifest-run-id>", handoffPath: "/path/to/handoff.json" })
-```
-
-The manifest stores one of these fail-closed eligibility states: `active` (an owning child is still running), `terminal-eligible` (complete merge evidence and recorded post-merge checks), `terminal-blocked` with a reason, `superseded-eligible` (an explicit replacement attestation), or `unknown` (missing or malformed evidence/manifest). Each attestation stores a digest of the manifest facts it covered; later group, worktree, or patch changes downgrade that evidence to `terminal-blocked` until it is recorded again. A terminal update recomputes a previously stored `active` state from the current child statuses and evidence. Conflicting reviewed heads and mismatched lane ids are rejected as stale. Existing workflow receipts remain immutable.
-
-`lane.status` renders the stored state and a copy-pasteable `worktree.cleanup` plan invocation. It never runs that invocation. All cleanup planning/apply and apply-time Git/ownership revalidation belong to `worktree.cleanup` from #1622; remote branch deletion and extension-side GitHub verification remain out of scope.
-
 ## Status and control actions
 
-### Failed lane recovery and execution-mode boundaries
+### Execution-mode boundaries after failures
 
-A failure in the subagent workflow, child launch, prompt runtime, extension loading, or child tooling setup is a lane infrastructure blocker, not permission to silently change execution mode. Stop and report the exact failure, run/status, and repo/cwd/worktree/branch/ref state. Before a same-protocol retry or asking the owner, verify the worktree is clean or capture the partial diff. Retry or fix the `subagent` path only through a clear same-protocol action.
+A failure in the subagent workflow, child launch, prompt runtime, extension loading, or child tooling setup is a workflow infrastructure blocker, not permission to silently change execution mode. Stop and report the exact failure, run/status, and repo/cwd/worktree/branch/ref state. Before a same-protocol retry or asking the owner, verify the worktree is clean or capture the partial diff. Retry or fix the `subagent` path only through a clear same-protocol action.
 
-For backlog lanes and other subagent-governed workflows, external/foreground/CLI fallback requires explicit owner approval. Do not silently switch to `interactive_shell`, `pi -ne`, Codex/Claude/Cursor CLI, a foreground agent, or another external mode. `interactive_shell` remains valid when the user explicitly requests visible foreground/CLI work or the task is outside the governed subagent protocol. Pi core may print a generic `pi -ne` extension-load hint; that out-of-repo hint is not protocol-approved fallback. A verified compaction abort may continue the retained child once on its already resolved model; it never selects another model.
+For other subagent-governed workflows, external/foreground/CLI fallback requires explicit owner approval. Do not silently switch to `interactive_shell`, `pi -ne`, Codex/Claude/Cursor CLI, a foreground agent, or another external mode. `interactive_shell` remains valid when the user explicitly requests visible foreground/CLI work or the task is outside the governed subagent protocol. Pi core may print a generic `pi -ne` extension-load hint; that out-of-repo hint is not protocol-approved fallback. A verified compaction abort may continue the retained child once on its already resolved model; it never selects another model.
 
 ```ts
 subagent({ action: "status" })

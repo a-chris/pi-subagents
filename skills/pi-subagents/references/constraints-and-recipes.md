@@ -25,14 +25,14 @@ Runtime config can change orchestration behavior. `asyncByDefault` and `forceTop
 
 ### Keep report artifacts out of the repository root
 
-Treat lane reports, review notes, council pass reports, and gate logs as scratch unless the user explicitly asks to keep them. Prefer `output: false` and the aggregate workflow result for short reports. When a later step needs a file, use the runtime-managed output artifact by setting a stable child key plus a relative `output` path such as `plans/deploy.md`; relative child outputs are saved under the run artifact directory, not the project root. Do not put `reports/...`, `*-report.json`, or similar repo-root paths in child task text.
+Treat review notes, council pass reports, and gate logs as scratch unless the user explicitly asks to keep them. Prefer `output: false` and the aggregate workflow result for short reports. When a later step needs a file, use the runtime-managed output artifact by setting a stable child key plus a relative `output` path such as `plans/deploy.md`; relative child outputs are saved under the run artifact directory, not the project root. Do not put `reports/...`, `*-report.json`, or similar repo-root paths in child task text.
 
 For durable evidence, copy only the final summary to session memory, a PR body/comment, a mission artifact, or a user-approved docs path outside the repo. After the PR, issue, or gate reaches a terminal state, delete or move scratch reports from the active worktree before reporting completion. Keep a project `.gitignore` entry for ad-hoc report patterns only as a safety net; it is not the cleanup mechanism.
 
 ## Best Practices
 
 - Run subagents asynchronously by default; direct one-child execution is enough for one bounded task, while `workflowScript` is the composition surface for JavaScript control flow and data-dependent branching. Use `async: false` only when the parent must block. See `references/execution-controls.md` → Async/background for wait semantics.
-- For a predeclared broad plan split into visible narrow stages, use `runs.lanes([...])` inside `workflowScript`; use raw `runs.run(...)`/`runs.all(...)` for conditional or rolling flows. See [`execution-controls.md`](execution-controls.md#parallel-sequential-lanes).
+- For a staged workflow, use ordinary `runs.run(...)`/`runs.all(...)` inside `workflowScript`. Use raw `runs.run(...)`/`runs.all(...)` for conditional or rolling flows.
 - Keep one writer per cwd/worktree. Parallelize reading, review, and validation; concurrent writers need isolated worktrees. Give every child a cold-start packet with its goal, target/ref, authority, context, success criteria, validation, output, and stop rules.
 - Keep tasks narrow and standalone; do not rely on issue numbers, broad globs, or mid-run messaging to supply missing context.
 - Keep authority with the parent. Escalate unapproved product, scope, architecture, merge, credential, or release decisions; checks, receipts, and review bots are evidence, not authority.
@@ -48,7 +48,6 @@ This reference keeps cross-cutting policy and failure handling. Load the matchin
 | Execution syntax, lifecycle, async/wait, missions, controls, watchdog, or worktrees | [`references/execution-controls.md`](execution-controls.md) |
 | Role choice, prompt contracts, review/research/cleanup techniques, or model tiering | [`references/prompting-and-roles.md`](prompting-and-roles.md) |
 | Fresh review, validation, gate failures, finding disposition, and final delivery checks | [`references/review-and-validation.md`](review-and-validation.md) |
-| Independent lanes, repositories, worktrees, and handoffs | [`references/multi-lane-orchestration.md`](multi-lane-orchestration.md) |
 | Agent management, file authoring, prompt integration, or RPC | [`references/management-authoring-rpc.md`](management-authoring-rpc.md) |
 
 After delegation is operator-authorized, choose the smallest recipe that earns

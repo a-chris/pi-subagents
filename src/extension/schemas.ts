@@ -100,15 +100,6 @@ const ChainGateOverride = Type.String({
 	description: "For chain steps with agentContract, choose whether the chain advances on execution success or acceptance success. Defaults to execution.",
 });
 
-const WorkflowLaneMetadata = Type.Object({
-	version: Type.Integer({ minimum: 1, maximum: 1 }),
-	key: Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" }),
-	mode: Type.Optional(Type.String({ enum: ["mutation", "review", "scout", "gate"] })),
-	sourceRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-	claims: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 160 }), { maxItems: 20 })),
-	outputPaths: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 256 }), { maxItems: 10 })),
-}, { additionalProperties: false, description: "Display/triage only; sourceRef is opaque, never resolved by status." });
-
 const ToolBudgetBlock = Type.Unsafe({
 	anyOf: [
 		{ type: "array", minItems: 1, items: { type: "string", minLength: 1 } },
@@ -121,16 +112,6 @@ const ToolBudgetOverride = Type.Object({
 	hard: Type.Integer({ minimum: 1 }),
 	block: Type.Optional(ToolBudgetBlock),
 }, { additionalProperties: false, description: "soft nudges; after hard, block tools (default read/grep/find/ls, '*' for all) so child can finalize." });
-
-const UsageBudgetLimitOverride = Type.Object({
-	soft: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
-	hard: Type.Number({ exclusiveMinimum: 0 }),
-}, { additionalProperties: false });
-
-const UsageBudgetOverride = Type.Object({
-	tokens: Type.Optional(UsageBudgetLimitOverride),
-	costUsd: Type.Optional(UsageBudgetLimitOverride),
-}, { additionalProperties: false, description: "Root-only reported usage; hard prevents later launches. Running children are not stopped." });
 
 const WorkflowPreflightLane = Type.Object({
 	key: Type.String({ minLength: 1, maxLength: 128 }),
@@ -145,7 +126,7 @@ const WorkflowPreflightOverride = Type.Object({
 	version: Type.Integer({ minimum: 1, maximum: 1 }),
 	coverage: Type.Optional(Type.String({ enum: ["complete", "partial"] })),
 	lanes: Type.Array(WorkflowPreflightLane, { maxItems: 64 }),
-}, { additionalProperties: false, description: "Display-only lane hints; coverage mismatches warn, never change authority/execution." });
+}, { additionalProperties: false, description: "Display-only planned workflow lanes; coverage mismatches warn, never change authority/execution." });
 
 // Parallel task item (within a parallel step)
 export const ParallelTaskSchema = Type.Object({
@@ -292,12 +273,8 @@ const SubagentParamProperties = {
 	dir: Type.Optional(Type.String({
 		description: "Async directory for status/control."
 	})),
-	handoffPath: Type.Optional(Type.String({ description: "Existing manifest for worktree/lane actions." })),
+	handoffPath: Type.Optional(Type.String({ description: "Existing manifest for worktree cleanup/discard actions." })),
 	repo: Type.Optional(Type.String({ description: "worktree.cleanup repo; default cwd." })),
-	planId: Type.Optional(Type.String({ description: "Reserved; cleanup is plan-only." })),
-	laneId: Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Exact manifest run id for lane actions." })),
-	merge: Type.Optional(Type.Unsafe({ type: "object", additionalProperties: true, description: "lane.recordMerge evidence; read guide tool-reference." })),
-	supersession: Type.Optional(Type.Unsafe({ type: "object", additionalProperties: true, description: "lane.recordSupersession evidence; read guide tool-reference." })),
 	index: Type.Optional(Type.Integer({ minimum: 0, description: "Zero-based child/transcript index." })),
 	childId: Type.Optional(Type.String({ minLength: 1, maxLength: 256, description: "Child-scoped stop identity." })),
 	view: Type.Optional(Type.String({
@@ -349,7 +326,6 @@ const SubagentParamProperties = {
 	isolation: Type.Optional(Type.String({ enum: ["none", "worktree"], description: "Shared cwd or managed git worktrees." })),
 	worktree: Type.Optional(Type.Boolean({ description: "Isolate each workflow child in a managed git worktree; child worktree:false overrides default." })),
 	baseRef: Type.Optional(Type.String()),
-	lane: Type.Optional(WorkflowLaneMetadata),
 	context: Type.Optional(Type.String({
 		enum: ["fresh", "fork", "summary"],
 		description: "fresh/fork/summary overrides every child. Omitted: each agent's declared defaultContext applies, else fresh; implicit fork/summary needs persisted parent + leaf, else fresh. forkContext may prune forks before spawn; summary generates a role-directed brief from the parent session.",
@@ -360,7 +336,6 @@ const SubagentParamProperties = {
 	checkpointBeforeDeadlineMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647, description: "Async single-agent runs only: the runner requests that the child checkpoint and stop this many ms before the run deadline (best-effort; the deadline kill still applies)." })),
 	toolTimeoutMs: Type.Optional(Type.Integer({ minimum: 1, description: "Per-tool deadline (ms); fast builtins default 5m." })),
 	toolBudget: Type.Optional(ToolBudgetOverride),
-	usageBudget: Type.Optional(UsageBudgetOverride),
 	agentScope: Type.Optional(Type.String({ description: "user/project/both (default); project wins collisions." })),
 	cwd: Type.Optional(Type.String({ description: "Execution directory." })),
 	artifacts: Type.Optional(Type.Boolean({ description: "Debug artifacts; default true." })),

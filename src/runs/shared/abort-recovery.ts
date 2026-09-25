@@ -74,7 +74,6 @@ export function planAbortRecovery(input: {
 	interrupted?: boolean;
 	timedOut?: boolean;
 	toolBudgetExhausted?: boolean;
-	usageBudgetExhausted?: boolean;
 	structuredOutputFailed?: boolean;
 	acceptanceFailed?: boolean;
 	currentTool?: string;
@@ -106,7 +105,7 @@ export function planAbortRecovery(input: {
 	// markers make that cleanup signal non-authoritative; explicit stop/interrupt still wins.
 	if (input.processSignal && !compactionAbortCandidate) return settle("process terminated by signal");
 	if (input.timedOut) return settle("elapsed timeout");
-	if (input.toolBudgetExhausted || input.usageBudgetExhausted) return settle("budget exhausted");
+	if (input.toolBudgetExhausted) return settle("budget exhausted");
 	if (input.structuredOutputFailed) return settle("structured output failure");
 	if (input.acceptanceFailed) return settle("acceptance failure");
 	if (input.currentTool) return settle(`active tool '${input.currentTool.slice(0, 128)}' remains in flight`);

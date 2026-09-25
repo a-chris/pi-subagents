@@ -247,7 +247,7 @@ describe("async status helpers", () => {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
 	});
-	it("projects bounded lane and display-only worktree metadata from status", () => {
+	it("projects display-only worktree metadata from status", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-async-status-lane-"));
 		try {
 			createAsyncDir(root, "run-lane", {
@@ -259,36 +259,15 @@ describe("async status helpers", () => {
 				steps: [{
 					agent: "worker",
 					workflowKey: "writer",
-					lane: { version: 1, key: "writer", mode: "mutation", sourceRef: "owner/repo#1621" },
 					worktreePath: "/tmp/worktrees/run-lane-0",
 					branch: "pi-subagent/run-lane-0",
 					status: "running",
 				}],
 			});
 			const run = listAsyncRuns(root, { states: ["running"] })[0]!;
-			assert.deepEqual(run.steps[0]?.lane, { version: 1, key: "writer", mode: "mutation", sourceRef: "owner/repo#1621" });
 			assert.equal(run.steps[0]?.worktreePath, "/tmp/worktrees/run-lane-0");
 			assert.equal(run.steps[0]?.branch, "pi-subagent/run-lane-0");
-			assert.match(formatAsyncRunList([run]), /lane writer/);
 			assert.match(formatAsyncRunList([run]), /worktree .*run-lane-0 .*branch pi-subagent\/run-lane-0/);
-		} finally {
-			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
-
-	it("rejects malformed or mismatched lane identity in status", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-async-status-lane-invalid-"));
-		try {
-			const runDir = createAsyncDir(root, "run-lane-invalid", {
-				runId: "run-lane-invalid",
-				mode: "workflow",
-				state: "running",
-				startedAt: 100,
-				steps: [{ agent: "worker", workflowKey: "writer", lane: { version: 1, key: "other" }, status: "running" }],
-			});
-			fs.rmSync(path.join(root, ACTIVE_RUN_INDEX_DIR, "run-lane-invalid"));
-			assert.throws(() => listAsyncRuns(root, { states: ["running"], repairScan: true }), /does not match workflow key/);
-			assert.equal(fs.existsSync(path.join(runDir, "status.json")), true);
 		} finally {
 			fs.rmSync(root, { recursive: true, force: true });
 		}
@@ -914,41 +893,6 @@ describe("async status helpers", () => {
 		}
 	});
 
-	it("isolates active status validation failures while preserving ordinary validation errors", () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-async-status-invalid-active-"));
-		const originalError = console.error;
-		const diagnostics: string[] = [];
-		try {
-			console.error = (...args: unknown[]) => diagnostics.push(args.map(String).join(" "));
-			createAsyncDir(root, "good-run", {
-				runId: "good-run",
-				mode: "single",
-				state: "running",
-				startedAt: 100,
-				steps: [{ agent: "worker", status: "running" }],
-			});
-			const invalidDir = createAsyncDir(root, "bad-validation", {
-				runId: "bad-validation",
-				mode: "workflow",
-				state: "running",
-				startedAt: 100,
-				steps: [{ agent: "worker", workflowKey: "writer", lane: { version: 1, key: "other" }, status: "running" }],
-			});
-			const markerPath = path.join(root, ACTIVE_RUN_INDEX_DIR, "bad-validation");
-
-			assert.deepEqual(listAsyncRuns(root, { states: ["running"], reconcile: false }).map((run) => run.id), ["good-run"]);
-			assert.equal(fs.existsSync(invalidDir), true);
-			assert.equal(fs.existsSync(markerPath), true);
-			assert.ok(diagnostics.some((message) => message.includes("bad-validation") && message.includes("Failed to validate async status file")));
-
-			fs.rmSync(markerPath);
-			assert.throws(() => listAsyncRuns(root, { states: ["running"], reconcile: false, repairScan: true }), /Failed to validate async status file/);
-		} finally {
-			console.error = originalError;
-			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
-
 	it("isolates active reconciliation validation failures while preserving ordinary failures", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-async-status-reconcile-invalid-active-"));
 		const originalError = console.error;
@@ -1298,3 +1242,4 @@ describe("async status helpers", () => {
 		}
 	});
 });
+

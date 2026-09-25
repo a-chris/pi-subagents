@@ -191,7 +191,7 @@ describe("reconcileDetachedWorkflowChildCompletion", () => {
 		assert.equal(published.success, false);
 		assert.match(published.error ?? "", /unsupported-continuation/);
 		assert.equal(published.workflowResolution, "settled-awaiting-resume");
-		assert.match(published.summary ?? "", /Workflow lanes settled/);
+		assert.match(published.summary ?? "", /Workflow children settled/);
 		assert.deepEqual(published.recovery, [{ key: "detaches", call: "runs.run", resume: { workflowRunId, key: "detaches", latest: true }, taskRequired: true }]);
 		assert.ok(published.summary?.includes(`Output path mappings: 'detaches': requested ${requestedPath} -> saved ${savedPath}`));
 		assert.equal(published.results?.[0]?.outputReference, savedPath);

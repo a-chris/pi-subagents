@@ -1909,7 +1909,6 @@ async function runSyncCompletionInner(
 			interrupted: attemptResult.interrupted || options.interruptSignal?.aborted,
 			timedOut: attemptResult.timedOut,
 			toolBudgetExhausted: attemptResult.toolBudgetBlocked,
-			usageBudgetExhausted: false,
 			structuredOutputFailed: attemptResult.structuredOutputFailed,
 			acceptanceFailed: false,
 			currentTool: attemptResult.progress?.currentTool,

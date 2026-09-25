@@ -5,7 +5,6 @@ import type { Message, Usage as PiUsage } from "@earendil-works/pi-ai";
 import { previewDisplayText, sanitizeDisplayText, truncateDisplayText } from "./display-text.ts";
 import { formatToolCall } from "./formatters.ts";
 import type { AgentProgress, AsyncStatus, Details, DisplayItem, ErrorInfo, NestedRunSummary, SingleResult, ToolCallSummary, Usage } from "./types.ts";
-import { validateAsyncStatusLaneMetadata } from "../runs/shared/lane-metadata.ts";
 
 const DEFAULT_CONFIG_DIR_NAME = ".pi";
 const PI_CODING_AGENT_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
@@ -184,13 +183,6 @@ export function readStatus(asyncDir: string): AsyncStatus | null {
 		status = JSON.parse(content) as AsyncStatus;
 	} catch (error) {
 		throw new Error(`Failed to parse async status file '${statusPath}': ${getErrorMessage(error)}`, {
-			cause: error instanceof Error ? error : undefined,
-		});
-	}
-	try {
-		validateAsyncStatusLaneMetadata(status, `Invalid async status '${statusPath}'`);
-	} catch (error) {
-		throw new Error(`Failed to validate async status file '${statusPath}': ${getErrorMessage(error)}`, {
 			cause: error instanceof Error ? error : undefined,
 		});
 	}

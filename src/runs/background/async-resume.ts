@@ -4,7 +4,6 @@ import { DIRS, type AcceptanceInput, type AsyncStatus, type SteeringRecoveryDesc
 import type { AgentConfig } from "../../agents/agents.ts";
 import { normalizeExtensionBindings } from "../shared/extension-bindings.ts";
 import { snapshotRequiredChildExtensions } from "../../shared/required-child-extensions.ts";
-import { normalizeWorkflowLaneMetadata } from "../shared/lane-metadata.ts";
 import { validateAcceptanceInput } from "../shared/acceptance.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
 import { intersectSubagentCapabilityCeilings, parseSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
@@ -347,7 +346,6 @@ export function readAsyncRecoveryDescriptor(asyncDir: string | undefined): Steer
 		try { parsed.requiredExtensions = snapshotRequiredChildExtensions(parsed.requiredExtensions, "requiredExtensions"); }
 		catch (error) { throw new Error(`Invalid async recovery descriptor '${descriptorPath}': ${error instanceof Error ? error.message : String(error)}`); }
 	}
-	if (parsed.lane !== undefined) parsed.lane = normalizeWorkflowLaneMetadata(parsed.lane, `Invalid async recovery descriptor '${descriptorPath}': lane`);
 	if (parsed.agentContract !== undefined) {
 		if (!parsed.agentContract || typeof parsed.agentContract !== "object" || Array.isArray(parsed.agentContract)) throw new Error(`Invalid async recovery descriptor '${descriptorPath}': agentContract must be an object.`);
 		const contract = parsed.agentContract as Record<string, unknown>;

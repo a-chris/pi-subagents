@@ -25,7 +25,7 @@ they do not authorize a launch.
 
 ## Tool vs Slash Commands
 
-Agents use the `subagent(...)` tool for execution, management, status, and control. Direct `{ agent, task }` execution is enough for one bounded child task; use `workflowScript` when the parent needs JavaScript control flow or data-dependent branching, keyed, parallel, sequential, retry, retained-resume, aggregate, or explicit staged-lane behavior (`runs.lanes`). Humans often use the slash-command layer instead:
+Agents use the `subagent(...)` tool for execution, management, status, and control. Direct `{ agent, task }` execution is enough for one bounded child task; use `workflowScript` when the parent needs JavaScript control flow or data-dependent branching, keyed, parallel, sequential, retry, retained-resume, aggregate, or explicit staged-child behavior. Humans often use the slash-command layer instead:
 
 - `/run` — launch a single agent
 - `workflowScript` — the sole public surface for sequence, parallelism, branching, retries, and aggregation
@@ -69,7 +69,7 @@ Council advisors are read-only. User or project `council-*` profiles choose allo
 
 ### Parallel review technique
 
-Use this when the user wants adversarial review of a diff, plan, issue, file, or implemented work. Launch fresh-context `reviewer` agents with distinct angles generated from the actual target. Common angles are correctness/regressions, tests/validation, and simplicity/maintainability; adapt for TypeScript, UI, security, docs, or large structural changes. Reviewers should inspect files and diffs directly, return concise evidence-backed findings with file/line references, and avoid edits unless the user explicitly asks for a writer pass. Filter on evidence, not severity: report concrete current issues within the named review target, with source proof, a test or repro, or a contract contradiction. For a diff review, require that the issue is caused or made reachable by that diff. Label findings P0/P1/P2 and end with `Merge verdict: BLOCK`, `Merge verdict: OK`, or `Merge verdict: OK with notes`. Use `blockers only` only for final pre-merge re-checks after P1/P2 findings are already captured, or for explicit emergency hotfix lanes where non-blocking findings are intentionally deferred. For targeted follow-up, ask only whether the named finding was resolved, whether the fix introduced a new defect in the fix blast radius, and whether prior P1/P2 notes still stand. For bot or PR-comment triage, classify each comment as VALID, STALE, INVALID, or OUT-OF-POLICY against current HEAD, then assign P0/P1/P2 only to VALID comments. The parent synthesizes fixes worth doing now, optional improvements, and feedback to ignore/defer before applying anything.
+Use this when the user wants adversarial review of a diff, plan, issue, file, or implemented work. Launch fresh-context `reviewer` agents with distinct angles generated from the actual target. Common angles are correctness/regressions, tests/validation, and simplicity/maintainability; adapt for TypeScript, UI, security, docs, or large structural changes. Reviewers should inspect files and diffs directly, return concise evidence-backed findings with file/line references, and avoid edits unless the user explicitly asks for a writer pass. Filter on evidence, not severity: report concrete current issues within the named review target, with source proof, a test or repro, or a contract contradiction. For a diff review, require that the issue is caused or made reachable by that diff. Label findings P0/P1/P2 and end with `Merge verdict: BLOCK`, `Merge verdict: OK`, or `Merge verdict: OK with notes`. Use `blockers only` only for final pre-merge re-checks after P1/P2 findings are already captured, or for explicit emergency hotfix tracks where non-blocking findings are intentionally deferred. For targeted follow-up, ask only whether the named finding was resolved, whether the fix introduced a new defect in the fix blast radius, and whether prior P1/P2 notes still stand. For bot or PR-comment triage, classify each comment as VALID, STALE, INVALID, or OUT-OF-POLICY against current HEAD, then assign P0/P1/P2 only to VALID comments. The parent synthesizes fixes worth doing now, optional improvements, and feedback to ignore/defer before applying anything.
 
 ### Proactive skill-specialist technique
 
@@ -121,7 +121,7 @@ Use this after implementation when the user or applicable instructions request d
 Use this when a broad diff has known reviewer findings across several items and the user wants the parent to “orchestrate subagents like a boss.” Keep the active worktree safe with a three-stage `workflowScript`:
 
 When staged seams are available, a low-tier writer should not receive the
-end-to-end issue. Use `runs.lanes` inside `workflowScript` to keep stages narrow:
+end-to-end issue. Compose `runs.run(...)`/`runs.all(...)` inside `workflowScript` to keep stages narrow:
 a scout/red test, helper-only change, one render seam, validation, minimality
 challenge, or fresh review. Give the writer only its assigned implementation
 stage; keep sequencing and synthesis with the parent.

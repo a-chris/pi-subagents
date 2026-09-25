@@ -277,75 +277,6 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		for (const worktreePath of worktreePaths) assert.equal(fs.existsSync(worktreePath), false);
 	});
 
-	it("applies a workflow usage budget across scripted child launches", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		mockPi.onCall({ output: "first result" });
-		const executor = makeExecutor([makeAgent("echo")]);
-
-		const result = await executor.execute(
-			"scripted-workflow-usage-budget",
-			{
-				async: false,
-				workflowScript: `
-					await runs.run("first", { agent: "echo", task: "First task" });
-					await runs.run("second", { agent: "echo", task: "Second task" });
-				`,
-				usageBudget: { tokens: { hard: 10 } },
-			},
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-
-		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /Usage budget exhausted/);
-		assert.equal(result.details.mode, "workflow");
-		assert.equal(mockPi.callCount(), 1);
-		assert.equal(result.details.usageBudget?.exhausted, true);
-		assert.deepEqual(result.details.workflow?.receipt?.terminalOutcome, { state: "partial", reason: "budget_exhausted" });
-		assert.equal(result.details.workflow?.receipt?.entries.first?.terminalOutcome, undefined);
-		assert.deepEqual(result.details.workflow?.receipt?.entries.second?.terminalOutcome, { state: "partial", reason: "budget_exhausted" });
-	});
-
-	it("admits a zero run-level tool budget only for marked structured delegated execution", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		const zeroBudget = { hard: 0, block: "*" as const };
-		const params = { agent: "echo", task: "Answer without tools", toolBudget: zeroBudget };
-		const ctx = makeMinimalCtx(tempDir);
-		const executor = makeExecutor([makeAgent("echo")]);
-
-		const ordinary = await executor.execute(
-			"ordinary-zero-budget",
-			{ ...params, delegatedAllowZeroToolBudget: true },
-			new AbortController().signal,
-			undefined,
-			ctx,
-		);
-		assert.equal(ordinary.isError, true);
-		assert.match(ordinary.content[0]?.text ?? "", /toolBudget\.hard must be an integer >= 1/);
-
-		const unmarkedDelegated = await executor.executeDelegated(
-			"unmarked-delegated-zero-budget",
-			params,
-			new AbortController().signal,
-			undefined,
-			ctx,
-		);
-		assert.equal(unmarkedDelegated.isError, true);
-		assert.match(unmarkedDelegated.content[0]?.text ?? "", /toolBudget\.hard must be an integer >= 1/);
-
-		mockPi.onCall({ output: "answered" });
-		const structuredDelegated = await executor.executeDelegated(
-			"structured-delegated-zero-budget",
-			{ ...params, delegatedAllowZeroToolBudget: true },
-			new AbortController().signal,
-			undefined,
-			ctx,
-		);
-		assert.equal(structuredDelegated.isError, undefined);
-		assert.deepEqual(structuredDelegated.details.toolBudget, zeroBudget);
-		assert.deepEqual(readCall().runtime?.toolBudget, zeroBudget);
-		assert.equal(mockPi.callCount(), 1);
-	});
-
 	it("passes an agent-level tool budget to an async single child", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		const toolBudget = { soft: 100, hard: 150, block: "*" as const };
 		mockPi.onCall({ output: "budget probe done" });
@@ -569,75 +500,6 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		assert.equal(result.isError, true);
 		assert.match(result.content[0]?.text ?? "", /Unknown action: not-a-real-action/);
 		assert.match(result.content[0]?.text ?? "", /Valid:/);
-	});
-
-	it("records and renders stored lane merge evidence through management actions", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		const manifestPath = path.join(tempDir, "lane-handoff.json");
-		fs.writeFileSync(manifestPath, JSON.stringify({
-			version: 1,
-			runId: "lane-action",
-			mode: "single",
-			source: "async",
-			cwd: tempDir,
-			createdAt: 1,
-			updatedAt: 1,
-			groups: [{
-				stepIndex: 0,
-				baseCommit: "base-commit",
-				repoRoot: tempDir,
-				children: [{
-					index: 0,
-					taskIndex: 0,
-					agent: "worker",
-					status: "completed",
-					summary: "done",
-					patch: { path: path.join(tempDir, "worker.patch"), branch: "lane-action-branch", changed: false, diffStat: "", filesChanged: 0, insertions: 0, deletions: 0 },
-				}],
-				cleanup: { state: "partial", pruned: false, tasks: [{ index: 0, path: path.join(tempDir, "worktree"), branch: "lane-action-branch", worktreeRemoved: false, branchRemoved: false, preserved: true }] },
-			}],
-		}, null, 2), "utf-8");
-		const executor = makeExecutor([makeAgent("echo")]);
-		const merge = {
-			prNumber: 1623,
-			reviewedHead: "8888888888888888888888888888888888888888",
-			mergeCommit: "9999999999999999999999999999999999999999",
-			treeEquivalent: true,
-			postMergeChecks: "recorded",
-			attestedBy: "nicobailon",
-			attestedAt: "2026-08-27T16:23:00.000Z",
-		};
-
-		const recorded = await executor.execute(
-			"lane-record-action",
-			{ action: "lane.recordMerge", laneId: "lane-action", handoffPath: manifestPath, merge },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(recorded.isError, undefined, recorded.content[0]?.text ?? "");
-		assert.match(recorded.content[0]?.text ?? "", /Cleanup eligibility: terminal-eligible/);
-		assert.equal(recorded.details.parallelHandoff?.cleanupEligibility?.state, "terminal-eligible");
-
-		const rendered = await executor.execute(
-			"lane-status-action",
-			{ action: "lane.status", laneId: "lane-action", handoffPath: manifestPath },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(rendered.isError, undefined, rendered.content[0]?.text ?? "");
-		assert.match(rendered.content[0]?.text ?? "", /Cleanup eligibility: terminal-eligible/);
-		assert.match(rendered.content[0]?.text ?? "", /action: "worktree\.cleanup"/);
-
-		const invalid = await executor.execute(
-			"lane-invalid-action",
-			{ action: "lane.recordMerge", laneId: "lane-action", handoffPath: manifestPath },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(invalid.isError, true);
-		assert.match(invalid.content[0]?.text ?? "", /merge must be an object/);
 	});
 
 	it("routes watchdog.configure through the management action path", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
@@ -5096,35 +4958,6 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		for (const worktreePath of worktreePaths) assert.equal(fs.existsSync(worktreePath), false);
 	});
 
-	it("applies a workflow usage budget across scripted child launches", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		mockPi.onCall({ output: "first result" });
-		const executor = makeExecutor([makeAgent("echo")]);
-
-		const result = await executor.execute(
-			"scripted-workflow-usage-budget",
-			{
-				async: false,
-				workflowScript: `
-					await runs.run("first", { agent: "echo", task: "First task" });
-					await runs.run("second", { agent: "echo", task: "Second task" });
-				`,
-				usageBudget: { tokens: { hard: 10 } },
-			},
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-
-		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /Usage budget exhausted/);
-		assert.equal(result.details.mode, "workflow");
-		assert.equal(mockPi.callCount(), 1);
-		assert.equal(result.details.usageBudget?.exhausted, true);
-		assert.deepEqual(result.details.workflow?.receipt?.terminalOutcome, { state: "partial", reason: "budget_exhausted" });
-		assert.equal(result.details.workflow?.receipt?.entries.first?.terminalOutcome, undefined);
-		assert.deepEqual(result.details.workflow?.receipt?.entries.second?.terminalOutcome, { state: "partial", reason: "budget_exhausted" });
-	});
-
 	it("admits a zero run-level tool budget only for marked structured delegated execution", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		const zeroBudget = { hard: 0, block: "*" as const };
 		const params = { agent: "echo", task: "Answer without tools", toolBudget: zeroBudget };
@@ -5388,75 +5221,6 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		assert.equal(result.isError, true);
 		assert.match(result.content[0]?.text ?? "", /Unknown action: not-a-real-action/);
 		assert.match(result.content[0]?.text ?? "", /Valid:/);
-	});
-
-	it("records and renders stored lane merge evidence through management actions", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		const manifestPath = path.join(tempDir, "lane-handoff.json");
-		fs.writeFileSync(manifestPath, JSON.stringify({
-			version: 1,
-			runId: "lane-action",
-			mode: "single",
-			source: "async",
-			cwd: tempDir,
-			createdAt: 1,
-			updatedAt: 1,
-			groups: [{
-				stepIndex: 0,
-				baseCommit: "base-commit",
-				repoRoot: tempDir,
-				children: [{
-					index: 0,
-					taskIndex: 0,
-					agent: "worker",
-					status: "completed",
-					summary: "done",
-					patch: { path: path.join(tempDir, "worker.patch"), branch: "lane-action-branch", changed: false, diffStat: "", filesChanged: 0, insertions: 0, deletions: 0 },
-				}],
-				cleanup: { state: "partial", pruned: false, tasks: [{ index: 0, path: path.join(tempDir, "worktree"), branch: "lane-action-branch", worktreeRemoved: false, branchRemoved: false, preserved: true }] },
-			}],
-		}, null, 2), "utf-8");
-		const executor = makeExecutor([makeAgent("echo")]);
-		const merge = {
-			prNumber: 1623,
-			reviewedHead: "8888888888888888888888888888888888888888",
-			mergeCommit: "9999999999999999999999999999999999999999",
-			treeEquivalent: true,
-			postMergeChecks: "recorded",
-			attestedBy: "nicobailon",
-			attestedAt: "2026-08-27T16:23:00.000Z",
-		};
-
-		const recorded = await executor.execute(
-			"lane-record-action",
-			{ action: "lane.recordMerge", laneId: "lane-action", handoffPath: manifestPath, merge },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(recorded.isError, undefined, recorded.content[0]?.text ?? "");
-		assert.match(recorded.content[0]?.text ?? "", /Cleanup eligibility: terminal-eligible/);
-		assert.equal(recorded.details.parallelHandoff?.cleanupEligibility?.state, "terminal-eligible");
-
-		const rendered = await executor.execute(
-			"lane-status-action",
-			{ action: "lane.status", laneId: "lane-action", handoffPath: manifestPath },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(rendered.isError, undefined, rendered.content[0]?.text ?? "");
-		assert.match(rendered.content[0]?.text ?? "", /Cleanup eligibility: terminal-eligible/);
-		assert.match(rendered.content[0]?.text ?? "", /action: "worktree\.cleanup"/);
-
-		const invalid = await executor.execute(
-			"lane-invalid-action",
-			{ action: "lane.recordMerge", laneId: "lane-action", handoffPath: manifestPath },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(invalid.isError, true);
-		assert.match(invalid.content[0]?.text ?? "", /merge must be an object/);
 	});
 
 	it("routes watchdog.configure through the management action path", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
@@ -9650,3 +9414,4 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 	});
 
 });
+

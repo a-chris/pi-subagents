@@ -1153,9 +1153,7 @@ function hasSingleChildDetailEvidence(job: AsyncJobState, step: AsyncJobStep): b
 		|| step.label?.trim()
 		|| step.workflowKey?.trim()
 		|| step.outputName?.trim()
-		|| step.lane
 		|| job.workflowKey?.trim()
-		|| job.lane
 		|| laneTraceForJob(job)?.phase?.trim()
 		|| laneTraceForJob(job)?.label?.trim()
 		|| step.timedOut

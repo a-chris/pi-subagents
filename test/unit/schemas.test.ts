@@ -72,13 +72,6 @@ interface SubagentParamsSchema {
 				graceTurns?: { minimum?: number };
 			};
 		};
-		usageBudget?: {
-			properties?: {
-				tokens?: { properties?: { soft?: { exclusiveMinimum?: number }; hard?: { exclusiveMinimum?: number } } };
-				costUsd?: { properties?: { soft?: { exclusiveMinimum?: number }; hard?: { exclusiveMinimum?: number } } };
-			};
-			description?: string;
-		};
 		id?: {
 			type?: string;
 			description?: string;
@@ -345,17 +338,6 @@ describe("SubagentParams schema", { skip: !schemasAvailable ? "typebox not avail
 		assert.equal(turnBudgetSchema, undefined);
 		assert.equal(toolBudgetSchema?.properties?.soft?.minimum, 1);
 		assert.equal(toolBudgetSchema?.properties?.hard?.minimum, 1);
-	});
-
-	it("includes root-only reported usage budget", () => {
-		const usageBudgetSchema = SubagentParams?.properties?.usageBudget;
-		assert.ok(usageBudgetSchema, "usageBudget schema should exist");
-		assert.equal(usageBudgetSchema.properties?.tokens?.properties?.soft?.exclusiveMinimum, 0);
-		assert.equal(usageBudgetSchema.properties?.tokens?.properties?.hard?.exclusiveMinimum, 0);
-		assert.equal(usageBudgetSchema.properties?.costUsd?.properties?.soft?.exclusiveMinimum, 0);
-		assert.equal(usageBudgetSchema.properties?.costUsd?.properties?.hard?.exclusiveMinimum, 0);
-		assert.match(String(usageBudgetSchema.description ?? ""), /root-only/i);
-		assert.match(String(usageBudgetSchema.description ?? ""), /running children are not stopped/i);
 	});
 
 	it("includes subagent control fields", () => {

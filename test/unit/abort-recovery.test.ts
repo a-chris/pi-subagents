@@ -78,7 +78,6 @@ describe("planAbortRecovery", () => {
 			{ interrupted: true },
 			{ timedOut: true },
 			{ toolBudgetExhausted: true },
-			{ usageBudgetExhausted: true },
 			{ structuredOutputFailed: true },
 			{ acceptanceFailed: true },
 		]) {

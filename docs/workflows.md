@@ -19,11 +19,11 @@ Child-safety boundaries are enforced at runtime:
 - By default, children do not register the `subagent` tool and receive boundary instructions that they are not the parent orchestrator and must not propose or run subagents.
 - The explicit exception is an agent whose resolved builtin `tools` includes `subagent`; that child gets a child-safe `subagent` tool for the fanout work the parent assigned, still bounded by `maxSubagentDepth`.
 
-### Failed lane recovery and execution-mode boundaries
+### Execution-mode boundaries after failures
 
-A failure in the subagent workflow, child launch, prompt runtime, extension loading, or child tooling setup is a lane infrastructure blocker. It is not permission to silently retry through `interactive_shell`, `pi -ne`, Codex/Claude/Cursor CLI, a foreground agent, or another external execution mode.
+A failure in the subagent workflow, child launch, prompt runtime, extension loading, or child tooling setup is a workflow infrastructure blocker. It is not permission to silently retry through `interactive_shell`, `pi -ne`, Codex/Claude/Cursor CLI, a foreground agent, or another external execution mode.
 
-Stop and report the exact failure, run/status, and repository/cwd/worktree/branch/ref state. Before a same-protocol retry or asking the owner, verify the worktree is clean or capture the partial diff. Retry or fix the `subagent` path only through a clear same-protocol action. For backlog lanes and other subagent-governed workflows, external/foreground/CLI fallback requires explicit owner approval. `interactive_shell` remains valid when the user explicitly requests visible foreground/CLI work or the task is outside the governed subagent protocol.
+Stop and report the exact failure, run/status, and repository/cwd/worktree/branch/ref state. Before a same-protocol retry or asking the owner, verify the worktree is clean or capture the partial diff. Retry or fix the `subagent` path only through a clear same-protocol action. For other subagent-governed workflows, external/foreground/CLI fallback requires explicit owner approval. `interactive_shell` remains valid when the user explicitly requests visible foreground/CLI work or the task is outside the governed subagent protocol.
 
 Pi core may print a generic `pi -ne` extension-load hint; that out-of-repo hint is not protocol-approved fallback. A verified compaction abort may continue the retained child once on its already resolved model; it does not authorize an execution-mode or model switch.
 
@@ -45,7 +45,7 @@ Add `autofix` to `/parallel-review` or `/parallel-cleanup` to apply only the syn
 
 Use direct `{ agent, task }` for one bounded child. Use `workflowScript` when the parent needs a stable keyed child, sequence, fanout, steering, retry, or aggregation. For ordinary parallel fanout, use `await runs.all([{ key, agent, task }, ...])`. It resolves to an ordered array, not a key map, so use indexes, destructuring, or `.map(...)`, not `results.<key>`. Do not read `.output` from unawaited `runs.run` launches. Store a `runs.run` promise only when the script later observes it with `await`, `Promise.race`, or `Promise.all`, such as steering a live child before awaiting its result. Scripts are ordinary JavaScript statement bodies. Use an explicit `return` for a useful result:
 
-For multi-step or parallel work, make exactly one top-level `subagent` workflow call with `async:true` and launch children only inside it. Read this guide for recipes rather than constructing a second top-level orchestration. Available sandbox helpers include `runs.run`, `runs.all`, `runs.lanes`, `runs.steer`, `runs.status`, `runs.ref`/`runs.refs`, `emit`, `console`, standard JavaScript, and mission `state` when enabled. No filesystem, shell, arbitrary Pi tools, or host globals are available; named resources alone may grant `runs.host` authority.
+For multi-step or parallel work, make exactly one top-level `subagent` workflow call with `async:true` and launch children only inside it. Read this guide for recipes rather than constructing a second top-level orchestration. Available sandbox helpers include `runs.run`, `runs.all`, `runs.steer`, `runs.status`, `runs.ref`/`runs.refs`, `emit`, `console`, standard JavaScript, and mission `state` when enabled. No filesystem, shell, arbitrary Pi tools, or host globals are available; named resources alone may grant `runs.host` authority.
 
 Workflow-level child controls default onto each `runs.run`/`runs.all` launch; explicit child fields override them. See [retained children](tool-reference.md#retained-children) for follow-up challenges, [output binding](tool-reference.md#output-mode-details) for durable artifacts, and [schedules](missions.md#schedules) for delayed/recurring scripts.
 
@@ -101,14 +101,12 @@ subagent({
     return runs.run("review", { agent: "reviewer", task: "Review:\n" + scan.output });
   `,
   timeoutMs: 900000,
-  toolBudget: { soft: 40, hard: 60 },
-  usageBudget: { tokens: { soft: 100000, hard: 150000 } }
+  toolBudget: { soft: 40, hard: 60 }
 });
 ```
 
 - `timeoutMs` sets the workflow deadline and bounds child deadlines to the remaining time.
 - `toolBudget` becomes the default for each child unless that child supplies a narrower value.
-- `usageBudget` accounts for reported usage across completed workflow children. Once exhausted, it rejects later child launches but does not stop children that are already running.
 - Budget and timeout stops return a structured `terminalOutcome` with `state: "partial"` and reason `budget_exhausted` or `timeout`. Workflow receipts keep settled child evidence for recovery.
 - After an async workflow receipt is successfully published, `workflowReceiptPath` exposes its exact path in wait completion details, completion notifications, and exact status/debug details. Text responses also identify the receipt. Pending runs and failed receipt publications omit the reference; older status records are not backfilled. The reference records publication, not a guarantee against later retention cleanup. Raw result files retain `workflowReceipt: { path, receipt }`.
 
@@ -148,51 +146,6 @@ subagent({ workflowScript: `
   return patch.output;
 ` });
 ```
-
-### Parallel sequential lanes
-
-For a bounded set of independent chains, `runs.lanes(...)` removes the mechanical loop that would otherwise connect each lane's stages. It is a helper inside `workflowScript`, not a new top-level `subagent` execution mode:
-
-```js
-subagent({ workflowScript: `
-  const board = await runs.lanes([
-    {
-      key: "api",
-      stages: [
-        { key: "writer", label: "Implement API behavior", agent: "worker", task: "Implement the API change" },
-        { key: "challenge", label: "Challenge API behavior", resume: "previous", task: "Challenge the API implementation" },
-        { key: "review", label: "Review API behavior", agent: "reviewer", task: "Review the API lane" }
-      ]
-    },
-    {
-      key: "ui",
-      stages: [
-        { key: "writer", label: "Implement UI behavior", agent: "worker", task: "Implement the UI change" },
-        { key: "review", label: "Review UI behavior", agent: "reviewer", task: "Review the UI lane" }
-      ]
-    }
-  ]);
-  return board.map((lane) => ({
-    key: lane.key,
-    state: lane.state,
-    failedStage: lane.failedStage,
-    stages: lane.stages.map((stage) => ({
-      key: stage.key,
-      state: stage.state,
-      ok: stage.ok,
-      runId: stage.runId,
-      outputReference: stage.outputReference,
-      verdict: stage.verdict
-    }))
-  }));
-` });
-```
-
-The first stage from every lane is launched in one existing `runs.all(...)` batch. Later stages in each lane start only after the preceding stage settles. A later stage with `resume: "previous"` requires the preceding child to return a retained `runId`; the helper then uses the existing retained-resume launch checks and does not accept an arbitrary run id. Generated child keys use `<lane>.<stage>`, while the returned board uses the local lane and stage keys.
-
-The helper validates the complete plain-JSON lane inventory before launching anything. It bounds the inventory to 32 lanes, 16 stages per lane, 64 total stages, and 64 KiB of canonical JSON; task and path fields retain the existing 1 MiB and 32 KiB limits. Stage keys must be unique within a lane and generated keys must be unique and valid workflow keys. A child failure, stopped/detached result, or explicit `structuredOutput.verdict === "blocked"` blocks only that lane; later stages are marked `skipped` and sibling lanes continue. Reviewer prose is never parsed.
-
-The board is bounded and contains only lane/stage keys, state, success, retained run ids, explicit output references, bounded errors, and an optional structured verdict. It does not return child transcripts or create a lane registry or cleanup authority. Use raw `runs.run(...)`/`runs.all(...)` when a workflow needs conditional or rolling orchestration beyond this helper.
 
 ### Host command steps
 
@@ -362,7 +315,7 @@ For first-pass review prompts, filter by evidence rather than by severity. Ask t
 reviewer to label concrete current findings P0/P1/P2 and end with `Merge verdict:
 BLOCK`, `Merge verdict: OK`, or `Merge verdict: OK with notes`. Reserve
 `blockers only` for final pre-merge re-checks after P1/P2 findings are already
-known, or for explicit emergency hotfix lanes.
+known, or for explicit emergency hotfix tracks.
 
 ```text
 /prompt-workflow review-release-candidate v0.51.0
@@ -401,35 +354,6 @@ Use `baseRef` to branch managed worktrees from `HEAD` or a supported named ref s
 Configure the worktree provider, native path layout, base directory, and setup hook in [configuration.md](configuration.md).
 
 Setup waits remain nonblocking and cancellable. Normal cleanup, including detached foreground finalization, waits for the same in-process setup turn rather than retaining worktrees merely because another setup is active. This is not a cross-process lock. Hooks must follow the [finite setup contract](configuration.md#worktreesetuphook).
-
-### Lane metadata lifecycle
-
-Workflow children may declare a bounded `lane` object (`version`, `key`, optional
-`mode`, opaque `sourceRef`, advisory `claims`, and advisory `outputPaths`). The
-lane key must match the `runs.run`/`runs.all` workflow key. These fields are
-display and triage hints only: they do not grant tools, authorization, or
-cleanup permission, and `sourceRef` is never resolved over the network while
-rendering status. Worktree paths and branches copied into status are also
-display-only; the handoff manifest remains the deletion authority.
-
-| Durable file | Owner | Pending / running / finalized / cleanup states | Release predicate | Rollback predicate | Stale-head behavior | Fail-closed cases |
-| --- | --- | --- | --- | --- | --- | --- |
-| `status.json` | Async runner and workflow status projector | Child step starts `pending`, becomes `running`, then terminal `complete`/`failed`/`paused`/`stopped`; worktree path and branch are copied at launch | Status is terminal and the existing active-run/process proof can release the run marker; lane metadata alone never releases a worktree | Setup or persistence failure keeps the lane unknown; only the existing verified setup rollback may remove a newly created worktree | Recorded status is retained; a base/head mismatch is not repaired or inferred from render-time Git calls | Missing, malformed, or key-mismatched lane data; only one of `worktreePath`/`branch`; unverified process state |
-| `handoffs/<run-id>.json` | Existing parallel handoff writer and cleanup engine | Group is `partial` with preserved cleanup tasks while pending/running; finalized groups contain child identity, patch, and cleanup evidence; cleanup is `partial` or `complete` | Only the existing cleanup engine's fresh Git checks and recorded task evidence can release a worktree/branch; #1621 adds no deletion path | Missing diff, failed capture, or cleanup error preserves the task and records the reason | `baseCommit` is retained as evidence; stale or changed heads remain unknown/preserved until an explicit later reconciliation | Missing/invalid manifest, mismatched run/key/task identity, duplicate identity, dirty or uncaptured work |
-| `workflow-receipt.json` | Workflow terminal settlement | No receipt while `pending`/`running`; terminal receipt is finalized with one optional lane block per keyed child | Receipt publication is complete only after every included child entry is serialized; it does not authorize cleanup | Receipt write failure leaves status/handoff evidence authoritative and the workflow reports the missing receipt | Existing receipt is not backfilled or rewritten from a newer head | Invalid version/state, mismatched entry key or lane key, stale continuation lineage |
-| `.active-runs` marker | Existing active-run index | `pending`/`running` while the runner is live; terminal marker remains until observed process proof | Marker removal requires the existing exact-run process-terminal proof | Unknown proof keeps the marker and lane retained for inspection | Marker state is not inferred from Git head or timestamps alone | Missing/unknown process proof, active marker, or foreign run identity |
-
-Older runs without lane metadata remain readable and retain their existing
-handoff/cleanup behavior. Missing lane, receipt, or handoff metadata is
-unknown—not eligible for destructive cleanup.
-
-Managed setup records actual allocation attempts in the handoff; only validated
-allocations become cleanup tasks and display-only status paths/branches. On
-cancellation or failure with unknown settlement, it retains actual/attempted
-ownership evidence and artifacts for manual reconciliation, blocking further
-unsafe setup and cleanup in that process. An allocator interrupted before
-reporting its path may leave branch-only diagnostics, never an invented path.
-Inspect the handoff before reconciliation; cleanup still requires fresh checks.
 
 ## Recursion guard
 

@@ -35,19 +35,10 @@ interface RuntimeAcknowledgedExtensions {
 	omitted?: number;
 }
 
-interface UsageBudgetState {
-	version?: number;
-	source?: string;
-	exhausted?: boolean;
-	reason?: string;
-	tokens?: { used?: number; hard?: number; exhausted?: boolean };
-	costUsd?: { used?: number; hard?: number; exhausted?: boolean };
-}
-
 interface AsyncExecutionResult {
 	content: Array<{ text?: string }>;
 	isError?: boolean;
-	details: { asyncId?: string; asyncDir?: string; launchContractDigest?: string; launchResolvedExtensions?: LaunchResolvedExtensions; runtimeAcknowledgedExtensions?: RuntimeAcknowledgedExtensions; usageBudget?: UsageBudgetState };
+	details: { asyncId?: string; asyncDir?: string; launchContractDigest?: string; launchResolvedExtensions?: LaunchResolvedExtensions; runtimeAcknowledgedExtensions?: RuntimeAcknowledgedExtensions };
 }
 
 interface AsyncResultPayload {

@@ -124,7 +124,7 @@ export function buildWorkflowChatProgressRows(trace: NonNullable<Details["workfl
 			}
 			continue;
 		}
-		const lane = workflowPreflightLaneForRuntimeKey(preflight, entry.key, [entry.generatedLaneKey]);
+		const lane = workflowPreflightLaneForRuntimeKey(preflight, entry.key);
 		const next: WorkflowChatProgressRow = existing ?? { key: entry.key, state: "running" };
 		if (lane && !next.preflight) next.preflight = lane;
 		next.state = entry.state === "completed"

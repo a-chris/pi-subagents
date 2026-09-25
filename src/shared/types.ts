@@ -159,22 +159,6 @@ export interface WorkflowResourceProvenance {
 	id: string;
 }
 
-/**
- * Bounded, launch-declared workflow lane metadata. This is display and
- * triage information only; capability ceilings, authorization, and cleanup
- * safety remain owned by their existing enforcement and handoff paths.
- */
-export type WorkflowLaneMode = "mutation" | "review" | "scout" | "gate";
-
-export interface WorkflowLaneMetadata {
-	version: 1;
-	key: string;
-	mode?: WorkflowLaneMode;
-	sourceRef?: string;
-	claims?: string[];
-	outputPaths?: string[];
-}
-
 /** Bounded foreground activity; excludes tool arguments and transcript content. */
 export interface WorkflowChildActivity {
 	currentTool?: string;
@@ -214,7 +198,6 @@ type WorkflowReceiptEntryResumability =
 
 export type WorkflowReceiptEntry = WorkflowReceiptEntryResumability & {
 	key: string;
-	lane?: WorkflowLaneMetadata;
 	terminalOutcome?: WorkflowTerminalOutcome;
 	agent?: string;
 	requestedContext?: "fresh" | "fork" | "summary";
@@ -432,7 +415,6 @@ export interface ParallelHandoffChild {
 	workflowKey?: string;
 	/** Child run id when the worktree belongs to a workflow child. */
 	runId?: string;
-	lane?: WorkflowLaneMetadata;
 	status: SubagentResultStatus;
 	summary: string;
 	outputPath?: string;
@@ -440,15 +422,6 @@ export interface ParallelHandoffChild {
 	structuredOutputPath?: string;
 	sessionPath?: string;
 	patch: ParallelHandoffPatch;
-}
-
-/** Launch-time identity retained while a handoff group has no terminal child rows yet. */
-export interface ParallelHandoffLaneBinding {
-	index: number;
-	taskIndex: number;
-	workflowKey?: string;
-	runId?: string;
-	lane?: WorkflowLaneMetadata;
 }
 
 export interface ParallelHandoffCleanupTask {
@@ -466,38 +439,11 @@ export interface ParallelHandoffCleanupTask {
 	errors?: string[];
 }
 
-export type CleanupEligibility =
-	| { state: "active" }
-	| { state: "terminal-eligible" }
-	| { state: "terminal-blocked"; reason: string }
-	| { state: "superseded-eligible" }
-	| { state: "unknown" };
-
-export interface ParallelHandoffMergeEvidence {
-	prNumber: number;
-	reviewedHead: string;
-	mergeCommit: string;
-	treeEquivalent: boolean | "unknown";
-	postMergeChecks: "recorded" | "unknown";
-	attestedBy: string;
-	attestedAt: string;
-	manifestDigest?: string;
-}
-
-export interface ParallelHandoffSupersessionEvidence {
-	supersededBy: string;
-	attestedBy: string;
-	attestedAt: string;
-	manifestDigest?: string;
-}
-
 export interface ParallelHandoffGroup {
 	stepIndex: number;
 	baseCommit: string;
 	repoRoot: string;
 	children: ParallelHandoffChild[];
-	/** Optional launch identities for pending groups before child results settle. */
-	laneBindings?: ParallelHandoffLaneBinding[];
 	cleanup: {
 		state: "complete" | "partial";
 		tasks: ParallelHandoffCleanupTask[];
@@ -515,9 +461,6 @@ export interface ParallelHandoffManifest {
 	createdAt: number;
 	updatedAt: number;
 	groups: ParallelHandoffGroup[];
-	merge?: ParallelHandoffMergeEvidence;
-	supersession?: ParallelHandoffSupersessionEvidence;
-	cleanupEligibility?: CleanupEligibility;
 }
 
 export interface ParallelHandoffReference {
@@ -527,7 +470,6 @@ export interface ParallelHandoffReference {
 	childCount: number;
 	changedPatches: number;
 	cleanupState: "complete" | "partial";
-	cleanupEligibility?: CleanupEligibility;
 }
 
 export interface AgentContract {
@@ -848,9 +790,8 @@ export interface SteeringRecoveryDescriptor {
 	structuredOutputSchema?: JsonSchemaObject;
 	acceptance?: AcceptanceInput;
 	controlConfig?: ResolvedControlConfig;
-	/** Resolved launch context for this async child. */
+	/** Context for this async child. */
 	context?: "fresh" | "fork" | "summary";
-	lane?: WorkflowLaneMetadata;
 	absoluteDeadlineAt?: number;
 	initialToolBudget?: ResolvedToolBudget;
 	maxSubagentDepth: number;
@@ -1173,30 +1114,7 @@ export interface RuntimeAcknowledgedChildExtensions {
 	omitted: number;
 }
 
-export interface UsageBudgetLimitConfig {
-	soft?: number;
-	hard: number;
-}
 
-export interface UsageBudgetConfig {
-	tokens?: UsageBudgetLimitConfig;
-	costUsd?: UsageBudgetLimitConfig;
-}
-
-export interface UsageBudgetMetricState extends UsageBudgetLimitConfig {
-	used: number;
-	outcome: "within-budget" | "soft-exceeded" | "hard-exceeded";
-}
-
-export interface UsageBudgetState {
-	version: 1;
-	/** Enforced from usage reported by completed or streaming child runs; no reservation estimates. */
-	source: "reported";
-	tokens?: UsageBudgetMetricState;
-	costUsd?: UsageBudgetMetricState;
-	exhausted: boolean;
-	reason?: "tokens" | "costUsd";
-}
 
 export interface SingleResult {
 	/**
@@ -1398,7 +1316,6 @@ export interface Details {
 	timedOut?: boolean;
 	stopped?: boolean;
 	toolBudget?: ResolvedToolBudget;
-	usageBudget?: UsageBudgetState;
 	progress?: AgentProgress[];
 	progressSummary?: ProgressSummary;
 	artifacts?: {
@@ -1461,8 +1378,6 @@ export interface Details {
 			phase?: string;
 			label?: string;
 			durationMs?: number;
-			/** Internal provenance for a generated runs.lanes child key. */
-			generatedLaneKey?: string;
 			warning?: string;
 			error?: string;
 		}>;
@@ -1654,7 +1569,6 @@ export interface AsyncStartedEvent {
 	launchContractDigest?: string;
 	launchResolvedExtensions?: LaunchResolvedChildExtensions;
 	runtimeAcknowledgedExtensions?: RuntimeAcknowledgedChildExtensions;
-	usageBudget?: UsageBudgetState;
 	timeoutMs?: number;
 	deadlineAt?: number;
 	turnBudget?: TurnBudgetState;
@@ -1801,7 +1715,6 @@ export interface AsyncStatus {
 	wrapUpRequested?: boolean;
 	toolBudget?: ToolBudgetState;
 	toolBudgetBlocked?: boolean;
-	usageBudget?: UsageBudgetState;
 	pid?: number;
 	cwd?: string;
 	/** Parent-resolved child session root retained for trusted restored transcript lookup. */
@@ -1824,7 +1737,6 @@ export interface AsyncStatus {
 	workflowChildren?: WorkflowChildSummary;
 	parentWorkflowRunId?: string;
 	workflowKey?: string;
-	lane?: WorkflowLaneMetadata;
 	/** Set when a durable schedule launched this run, so completions can name their origin. */
 	scheduleOrigin?: ScheduleOrigin;
 	steps?: Array<{
@@ -1843,7 +1755,6 @@ export interface AsyncStatus {
 		phase?: string;
 		label?: string;
 		workflowKey?: string;
-		lane?: WorkflowLaneMetadata;
 		/** Display-only worktree path copied at launch; handoff remains authoritative. */
 		worktreePath?: string;
 		/** Display-only branch copied at launch; handoff remains authoritative. */
@@ -1987,7 +1898,6 @@ export interface AsyncJobState {
 	outputFile?: string;
 	totalTokens?: TokenUsage;
 	totalCost?: CostSummary;
-	usageBudget?: UsageBudgetState;
 	sessionFile?: string;
 	controlEventCursor?: number;
 	nestedRoute?: NestedRouteInfo;
@@ -1996,7 +1906,6 @@ export interface AsyncJobState {
 	workflowKey?: string;
 	workflow?: Details["workflow"];
 	workflowChildren?: WorkflowChildSummary;
-	lane?: WorkflowLaneMetadata;
 }
 
 export interface ForegroundResumeChild {
@@ -2107,7 +2016,7 @@ export interface ForegroundRunControl {
 	runId: string;
 	/** Workflow shell that owns this live foreground child, when applicable. */
 	parentWorkflowRunId?: string;
-	/** Stable workflow lane key for this live foreground child. */
+	/** Stable workflow identity for this live foreground child. */
 	workflowKey?: string;
 	/** Originating parent session; required for public fleet projection. */
 	sessionId?: string;
@@ -2317,7 +2226,6 @@ export interface RunSyncOptions {
 	toolTimeoutMs?: number;
 	/** Raw global config.toolTimeoutMs, used by the per-child resolver. */
 	configToolTimeoutMs?: number;
-	usageBudget?: UsageBudgetConfig;
 	toolBudget?: ResolvedToolBudget;
 	allowZeroToolBudget?: boolean;
 	onUpdate?: (r: import("@earendil-works/pi-agent-core").AgentToolResult<Details>) => void;
@@ -2555,7 +2463,6 @@ export interface ExtensionConfig {
 	toolBudget?: ToolBudgetConfig;
 	/** Opt-in native tool permissions. Bash remains outside this policy. */
 	permissions?: import("../runs/shared/permissions.ts").PermissionConfig;
-	usageBudget?: UsageBudgetConfig;
 	parallel?: TopLevelParallelConfig;
 	chain?: ExtensionChainConfig;
 	worktreeSetupHook?: string;
@@ -2688,7 +2595,7 @@ export const POLL_INTERVAL_MS = 250;
 export const WIDGET_ANIMATION_INTERVAL_MS = 1000;
 export const MAX_WIDGET_JOBS = 4;
 export const DEFAULT_SUBAGENT_MAX_DEPTH = 2;
-export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "guide", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "lane.status", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.command", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "watchdog.recommend-model", "schedule.create", "schedule.list", "schedule.show", "schedule.history", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"] as const;
+export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "guide", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.command", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "watchdog.recommend-model", "schedule.create", "schedule.list", "schedule.show", "schedule.history", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"] as const;
 
 export const DEFAULT_FORK_PREAMBLE =
 	"You are a delegated subagent running from a fork of the parent session. " +

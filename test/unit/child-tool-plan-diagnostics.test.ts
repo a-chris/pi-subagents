@@ -19,7 +19,7 @@ describe("public child tool plan diagnostics", () => {
 					requestedTools: ["read", "grep", "find", "ls", "bash"],
 					effectiveTools: [],
 				}));
-				assert.match(error.message, /lane infrastructure failure, not a completed review\/scout result/);
+				assert.match(error.message, /workflow infrastructure failure, not a completed review\/scout result/);
 				return true;
 			},
 		);
@@ -41,7 +41,7 @@ describe("public child tool plan diagnostics", () => {
 				assert.match(error.message, /permitted required repository tools \[read\]/);
 				assert.match(error.message, /Active capability ceiling sources: \[parent-policy, plan-mode\]/);
 				assert.match(error.message, /Explicit excludeTools: \[write\]/);
-				assert.match(error.message, /lane infrastructure failure/);
+				assert.match(error.message, /workflow infrastructure failure/);
 				return true;
 			},
 		);

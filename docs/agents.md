@@ -60,7 +60,7 @@ The Pi async run remains the source of truth for status, artifacts, wake/wait, m
 
 ### Advisory runner data boundary
 
-External CLI agents use their own runner contract. They are deliberate execution modes, not implicit recovery paths for a failed native `subagent` workflow. For backlog lanes and other subagent-governed workflows, switching to an external, foreground, or CLI runner requires explicit owner approval after the exact failure/run/worktree state is recorded and the worktree is verified clean or its partial diff is captured. Do not pass native Pi child options such as model override, structured output, acceptance/agent contract, tool budgets, fast mode, fork context, skills, or native Pi tools unless the adapter explicitly implements them.
+External CLI agents use their own runner contract. They are deliberate execution modes, not implicit recovery paths for a failed native `subagent` workflow. For other subagent-governed workflows, switching to an external, foreground, or CLI runner requires explicit owner approval after the exact failure/run/worktree state is recorded and the worktree is verified clean or its partial diff is captured. Do not pass native Pi child options such as model override, structured output, acceptance/agent contract, tool budgets, fast mode, fork context, skills, or native Pi tools unless the adapter explicitly implements them.
 
 The generic `external-cli` runner is the vendor-neutral way to delegate one shot to any command-line program installed on PATH. Define it in an agent file:
 

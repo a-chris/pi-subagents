@@ -220,7 +220,7 @@ export function reconcileDetachedWorkflowChildCompletion(input: {
 	const results = workflowResultChildren(next, input.childRunId, input.result, existing?.results, receipt) as WorkflowPublicChild[];
 	const recovery = workflowRecoveryActions(receipt);
 	const summary = `${resolution === "settled-awaiting-resume"
-		? `Workflow lanes settled after detached child ${input.childRunId} finished. JavaScript workflow continuation was not persisted.${recovery.length ? " Use the listed keyed recovery action to continue a child." : " No retained child is resumable."}`
+		? `Workflow children settled after detached child ${input.childRunId} finished. JavaScript workflow continuation was not persisted.${recovery.length ? " Use the listed keyed recovery action to continue a child." : " No retained child is resumable."}`
 		: next.state === "complete"
 			? `Workflow completed after detached child ${input.childRunId} finished.`
 			: next.error ?? (typeof existing?.summary === "string" ? existing.summary : "Workflow failed.")}${workflowOutputPathMappingSummary(results)}`;

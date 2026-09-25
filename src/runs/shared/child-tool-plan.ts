@@ -92,7 +92,7 @@ export function formatReviewLaneToolContractFailure(input: {
 		`Requested tool names: ${input.requestedTools ? `[${input.requestedTools.join(", ")}]` : "not explicitly specified"}; effective tool allowlist: [${input.effectiveTools.join(", ")}].`,
 		...(input.ceilingSources?.length ? [`Active capability ceiling sources: [${input.ceilingSources.join(", ")}].`] : []),
 		...(input.excludeTools?.length ? [`Explicit excludeTools: [${input.excludeTools.join(", ")}].`] : []),
-		"This is a lane infrastructure failure, not a completed review/scout result.",
+		"This is a workflow infrastructure failure, not a completed review/scout result.",
 	].join(" ");
 }
 

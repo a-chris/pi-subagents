@@ -689,43 +689,6 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 		assert.equal(mockPi.callCount(), 1);
 	});
 
-	it("background parallel groups report usage budget state and block queued children", { skip: !isAsyncAvailable() ? "jiti not available" : undefined }, async () => {
-		mockPi.onCall({ output: "first async result" });
-		const id = `async-usage-budget-${Date.now().toString(36)}`;
-		const launch = executeAsyncChain(id, {
-			chain: [{
-				parallel: [
-					{ agent: "first", task: "First task" },
-					{ agent: "second", task: "Second task" },
-				],
-				concurrency: 1,
-			}],
-			resultMode: "parallel",
-			usageBudget: { tokens: { hard: 10 } },
-			agents: [makeAgent("first"), makeAgent("second")],
-			ctx: { pi: { events: { emit() {} } }, cwd: tempDir, currentSessionId: "session-1" },
-			artifactConfig: { enabled: false, includeInput: false, includeOutput: false, includeJsonl: false, includeMetadata: false, cleanupDays: 7 },
-			shareEnabled: false,
-			maxSubagentDepth: 2,
-		});
-
-		assert.equal(launch.details.usageBudget?.exhausted, false);
-		const payload = await readAsyncPayload(id);
-		const status = JSON.parse(fs.readFileSync(path.join(ASYNC_DIR, id, "status.json"), "utf-8")) as AsyncStatusPayload;
-		assert.equal(payload.success, false);
-		assert.equal(payload.state, "failed");
-		assert.match(payload.error ?? payload.summary ?? "", /Usage budget exhausted/);
-		assert.equal(payload.results.length, 2);
-		assert.equal(payload.results[1]?.skipped, true);
-		assert.match(payload.results[1]?.error ?? "", /Usage budget exhausted/);
-		assert.equal(mockPi.callCount(), 1);
-		assert.equal(payload.usageBudget?.exhausted, true);
-		assert.equal(payload.usageBudget?.reason, "tokens");
-		assert.equal(status.usageBudget?.exhausted, true);
-		assert.equal(status.steps?.[0]?.status, "complete");
-		assert.equal(status.steps?.[1]?.status, "failed");
-	});
-
 	it("routes async artifacts to the configured session directory", { skip: !isAsyncAvailable() || !createSubagentExecutor ? "jiti or executor not available" : undefined }, async () => {
 		mockPi.onCall({ output: "async session artifact" });
 		const sessionFile = path.join(tempDir, "sessions", "parent-session", "session.jsonl");
@@ -1031,3 +994,4 @@ describe("async execution utilities", { skip: !available ? "pi packages not avai
 	});
 
 });
+

@@ -29,7 +29,7 @@ import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
 import { applyWatchdogLaunchRules } from "../../watchdog/rules.ts";
 import { childWatchdogProgressForModel } from "../../watchdog/child-status.ts";
-import { normalizeParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, resolveModelSelection, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
+import { normalizeParentModel, resolveEffectiveSubagentModel, resolveModelOrigin, type ModelOrigin, type ParentModel } from "../shared/model-resolution.ts";
 import { getHostBuiltinToolNames } from "../shared/child-tool-plan.ts";
 import { projectChainOutputSchemas, resolveEffectiveOutputSchema } from "../shared/child-launch-plan.ts";
 import { formatRetainedChildren, listRetainedChildren } from "../background/retained-children.ts";
@@ -65,7 +65,6 @@ import { formatSpawnBudget, getSpawnBudgetSnapshot, grantSpawnBudget, preflightS
 import { claimRunFanoutBatch, claimRunFanoutBatchWithCommit, createRunFanoutBudget, formatRunFanoutBudget, getRunFanoutBudgetSnapshot, readRunFanoutBudgetDescriptor, RunFanoutLimitError, writeRunFanoutBudgetDescriptor } from "../shared/run-fanout-budget.ts";
 import { retainLiveForegroundNestedRoute } from "../../integrations/pi-web-session-liveness.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
-import { usageBudgetExceededMessage, usageBudgetState, validateUsageBudgetConfig } from "../shared/usage-budget.ts";
 import { intersectSubagentCapabilityCeilings, resolveCurrentSubagentCapabilityCeiling, type ResolvedSubagentCapabilityCeiling } from "../shared/capability-ceiling.ts";
 import { isAgentContract } from "../shared/agent-contract.ts";
 import { normalizeExtensionBindings, type ExtensionBindings } from "../shared/extension-bindings.ts";
@@ -74,7 +73,7 @@ import { finalizeSingleOutput, injectSingleOutputInstruction, normalizeSingleOut
 import { assertJsonSchemaObject, cleanupStructuredOutputRuntime, createStructuredOutputRuntime } from "../shared/structured-output.ts";
 import { compactForegroundDetails, getSingleResultOutput, readStatus, resolveChildCwd, sumResultsCost, sumResultsUsage, toAgentToolUsage } from "../../shared/utils.ts";
 import { createTaskMutationArbiter } from "../shared/llm-intent-arbiter.ts";
-import { discardPreservedWorktrees, formatParallelHandoffError, formatParallelHandoffReference, formatStoredParallelHandoffCleanup, parallelHandoffPath, readParallelHandoffManifest, recordParallelHandoffMerge, recordParallelHandoffSupersession, writeParallelHandoffGroup, writeWorktreeSetupHandoff } from "../shared/parallel-handoff.ts";
+import { discardPreservedWorktrees, formatParallelHandoffError, formatParallelHandoffReference, parallelHandoffPath, writeParallelHandoffGroup, writeWorktreeSetupHandoff } from "../shared/parallel-handoff.ts";
 import { summarizeContextModes, type ContextMode, type ContextSummary } from "../shared/context-mode.ts";
 import { applySteeringRecoveryAgentConfig, asyncReviveRequiresRecoveryDescriptor, buildRevivedAsyncTask, readAsyncRecoveryDescriptor, resolveAsyncResumeTarget, resolveAsyncRunLocation } from "../background/async-resume.ts";
 import { closeSteerInbox, consumeSteerRequests, deliverInterruptRequest, readRevivalBriefs, requestAsyncSteer, watchAsyncControlInbox, type SteerDeliveryMode, type SteerRequest } from "../background/control-channel.ts";
@@ -109,12 +108,11 @@ import { createMissionWorkflowState } from "../../missions/workflow-state.ts";
 import { resolveAuthorityDecision } from "../../policy/authority.ts";
 import { handleInspectorAction, INSPECTOR_ACTIONS } from "../../inspectors/actions.ts";
 import { createBuiltinInspectorPlugins } from "../../inspectors/plugins.ts";
-import { previewSimpleWorkflowRun, runWorkflowScript, validateWorkflowScript, WorkflowScriptError, type WorkflowLanePlan, type WorkflowReceiptResumeReference, type WorkflowScriptChildResult, type WorkflowScriptTraceEntry, type WorkflowSteerOptions, type WorkflowSteerResult } from "../../workflows/scripted-workflow.ts";
+import { previewSimpleWorkflowRun, runWorkflowScript, validateWorkflowScript, WorkflowScriptError, type WorkflowReceiptResumeReference, type WorkflowScriptChildResult, type WorkflowSteerOptions, type WorkflowSteerResult } from "../../workflows/scripted-workflow.ts";
 import { formatIncrementalChildCompletion, incrementalChildCompletionTriggersTurn } from "../background/notify.ts";
 import { executeWorkflowHostCommand, resolveWorkflowHostOutputClaimPath, type WorkflowHostCommandParams, type WorkflowHostCommandResult } from "../../workflows/host-command.ts";
 import { buildWorkflowReceipt, readWorkflowReceipt, workflowReceiptPath, resolveWorkflowReceiptResumeEntry, writeWorkflowReceipt, type WorkflowReceipt, type WorkflowReceiptState } from "../../workflows/workflow-receipt.ts";
 import { upsertHostStep, validHostStepNodes } from "../shared/host-step-status.ts";
-import { assertWorkflowLaneKey, normalizeWorkflowLaneMetadata } from "../shared/lane-metadata.ts";
 import { parseWorkflowChildSummary, workflowChildProgress, workflowChildSummary } from "../../workflows/workflow-child-summary.ts";
 import { resolveWorkflowChatProgress, type WorkflowChatProgressProjection } from "../../workflows/chat-progress.ts";
 import { annotateWorkflowPreflightTrace, formatWorkflowPreflight, formatWorkflowPreflightWarnings, normalizeWorkflowPreflight, workflowPreflightWarnings } from "../../workflows/workflow-preflight.ts";
@@ -172,11 +170,7 @@ import {
 	type SubagentChildStatusEvent,
 	type ToolBudgetConfig,
 	type Usage,
-	type UsageBudgetConfig,
 	type WorkflowResourceProvenance,
-	type WorkflowGraphNode,
-	type WorkflowGraphSnapshot,
-	type WorkflowNodeStatus,
 	type WorkflowTerminalOutcome,
 	type SubagentRunMode,
 	type SubagentState,
@@ -197,7 +191,7 @@ import {
 import { generateContextBrief, wrapPrequelTask, wrapSummaryTask } from "../../shared/context-brief.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 
-const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "lane.recordMerge", "lane.recordSupersession", "refine", "refine.rollback", "dismiss", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
+const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "watchdog.configure", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "refine", "refine.rollback", "dismiss", "schedule.create", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"]);
 const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["delete", "eject", "disable", "reset", "mission.close", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt", "schedule.delete"]);
 
 function resolveSteerDeliveryMode(mode: SubagentParamsLike["mode"]): SteerDeliveryMode | undefined {
@@ -309,9 +303,6 @@ export interface SubagentParamsLike {
 	runId?: string;
 	dir?: string;
 	handoffPath?: string;
-	laneId?: string;
-	merge?: unknown;
-	supersession?: unknown;
 	index?: number;
 	childId?: string;
 	view?: "fleet" | "transcript";
@@ -331,7 +322,6 @@ export interface SubagentParamsLike {
 	steeringRecovery?: boolean;
 	mode?: SteerDeliveryMode | "plan" | "apply";
 	repo?: string;
-	planId?: string;
 	workflowScript?: string;
 	workflowScriptPath?: string;
 	globalConcurrencyLimit?: number;
@@ -343,7 +333,6 @@ export interface SubagentParamsLike {
 	/** Internal workflow ownership metadata; not part of the public schema. */
 	workflowParentRunId?: string;
 	workflowKey?: string;
-	lane?: import("../../shared/types.ts").WorkflowLaneMetadata;
 	/** Set by the scheduler so this run's completion can name the schedule that produced it. */
 	scheduleOrigin?: ScheduleOrigin;
 	workflowChildAsyncId?: string;
@@ -379,7 +368,6 @@ export interface SubagentParamsLike {
 	/** Optional hard per-tool-call timeout (ms). Known-fast tools also have a default. */
 	toolTimeoutMs?: number;
 	toolBudget?: ToolBudgetConfig;
-	usageBudget?: UsageBudgetConfig;
 	clarify?: boolean;
 	share?: boolean;
 	control?: ControlConfig;
@@ -510,9 +498,6 @@ interface ExecutionContextData {
 	/** Raw global config.toolTimeoutMs, for per-step resolution in async runners. */
 	configToolTimeoutMs?: number;
 	toolBudget?: ResolvedToolBudget;
-	usageBudget?: UsageBudgetConfig;
-	/** Parent workflow owns this allowance; presence vetoes unverifiable child continuation. */
-	inheritedUsageBudget?: UsageBudgetConfig;
 	allowZeroToolBudget?: boolean;
 	configToolBudget?: ResolvedToolBudget;
 	contextPolicy: AgentDefaultContextPolicy;
@@ -2130,7 +2115,6 @@ async function resumeAsyncRun(input: {
 		// A retained async child already owns the recorded worktree. Resume it in
 		// place rather than allocating a second provider worktree around it.
 		worktree: input.params.worktree === true && !("managedWorktree" in target && target.managedWorktree === true),
-		lane: input.params.lane ?? recoveryDescriptor?.lane,
 		controlConfig: resolveRevivalControlConfig({ globalConfig: input.deps.config.control, requestedControl: input.params.control, recoveryControlConfig: recoveryDescriptor?.controlConfig }),
 		availableModels,
 		output: input.params.output !== undefined ? input.params.output : foregroundContract?.output ?? recoveryDescriptor?.outputPath,
@@ -3299,7 +3283,6 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			acceptance: params.acceptance,
 			timeoutMs: data.timeoutMs,
 			toolBudget: data.toolBudget,
-			usageBudget: data.usageBudget,
 			configToolBudget: data.configToolBudget,
 			toolTimeoutMs: data.params?.toolTimeoutMs,
 			checkpointBeforeDeadlineMs: data.params?.checkpointBeforeDeadlineMs ?? deps.config.checkpointBeforeDeadlineMs,
@@ -3308,7 +3291,6 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			runFanoutBudget: data.runFanoutBudget,
 			parentWorkflowRunId: params.workflowParentRunId,
 			workflowKey: params.workflowKey,
-			lane: params.lane,
 			workflowAwaitAsync: params.workflowAwaitAsync,
 		}));
 		return waitForWorkflowAsyncSingleResult(params, asyncResult, { runId: id, task: params.task ?? "", signal: data.signal, state: deps.state, kill: deps.kill });
@@ -3576,7 +3558,6 @@ async function finalizeSingleWorktreeHandoff(input: {
 	agent: string;
 	result: SingleResult;
 	workflowKey?: string;
-	lane?: import("../../shared/types.ts").WorkflowLaneMetadata;
 }): Promise<{ suffix: string; reference?: NonNullable<Details["parallelHandoff"]> }> {
 	let admitted = false;
 	try {
@@ -3595,13 +3576,11 @@ async function finalizeSingleWorktreeHandoff(input: {
 				stepIndex: 0,
 				flatStartIndex: 0,
 				setup: input.worktreeSetup,
-				laneBindings: input.workflowKey || input.lane ? [{ index: 0, taskIndex: 0, ...(input.workflowKey ? { workflowKey: input.workflowKey } : {}), runId: input.workflowKey ? input.runId : undefined, ...(input.lane ? { lane: input.lane } : {}) }] : undefined,
 				diffs,
 				results: [{
 					agent: input.result.agent,
 					...(input.workflowKey ? { workflowKey: input.workflowKey } : {}),
 					...(input.workflowKey ? { runId: input.runId } : {}),
-					...(input.lane ? { lane: input.lane } : {}),
 					status: childTerminalStatus(input.result),
 					summary: input.result.error ? `${input.result.error}${getSingleResultOutput(input.result).trim() ? `\n\nOutput:\n${getSingleResultOutput(input.result).trim()}` : ""}` : getSingleResultOutput(input.result).trim() || "(no output)",
 					...(input.result.artifactPaths?.outputPath ? { outputPath: input.result.artifactPaths.outputPath } : {}),
@@ -3661,13 +3640,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		contextPolicy,
 		suppressUnchangedDelegationUpdates,
 	} = data;
-	let lane: import("../../shared/types.ts").WorkflowLaneMetadata | undefined;
-	try {
-		lane = normalizeWorkflowLaneMetadata(params.lane, "lane");
-		assertWorkflowLaneKey(lane, params.workflowKey, "lane");
-	} catch (error) {
-		return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: { mode: "single", results: [] } };
-	}
 	const onControlEvent = createForegroundControlNotifier(data, deps);
 	const allProgress: AgentProgress[] = [];
 	const allArtifactPaths: ArtifactPaths[] = [];
@@ -3728,7 +3700,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		params.baseRef,
 		deps.config.worktreeProvider,
 		deps.config.worktreeBranchPrefix,
-		params.lane?.key ?? params.workflowKey,
+		params.workflowKey,
 		task,
 		(progress) => {
 			pendingHandoff = writeWorktreeSetupHandoff({
@@ -3740,7 +3712,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 				stepIndex: 0,
 				flatStartIndex: 0,
 				progress,
-				laneBindings: params.workflowKey || lane ? [{ index: 0, taskIndex: 0, ...(params.workflowKey ? { workflowKey: params.workflowKey, runId } : {}), ...(lane ? { lane } : {}) }] : undefined,
 			});
 		},
 		signal,
@@ -3930,7 +3901,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 				}
 				try {
 					if (worktreeSetup) {
-						await finalizeSingleWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: sourceCwd, agent: params.agent!, result, workflowKey: params.workflowKey, lane });
+						await finalizeSingleWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: sourceCwd, agent: params.agent!, result, workflowKey: params.workflowKey });
 					}
 					try {
 						updateRememberedForegroundChild(deps.state, { runId, mode: "single", cwd: singleCwd, sessionId: data.parentSessionId, index: 0, result, events: deps.pi.events, notify: true });
@@ -3966,7 +3937,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			toolTimeoutMs: params.toolTimeoutMs,
 			configToolTimeoutMs: data.configToolTimeoutMs,
 			toolBudget: effectiveToolBudget.toolBudget,
-			usageBudget: data.usageBudget ?? data.inheritedUsageBudget,
 			capabilityCeiling: data.capabilityCeiling,
 			allowZeroToolBudget: data.allowZeroToolBudget && effectiveToolBudget.toolBudget === data.toolBudget,
 		}));
@@ -3991,7 +3961,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	if (worktreeSetup) {
 		worktreeHandoff = r.detached
 			? { suffix: pendingHandoff ? formatParallelHandoffReference(pendingHandoff) : "", reference: pendingHandoff }
-			: await finalizeSingleWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: sourceCwd, agent: params.agent!, result: r, workflowKey: params.workflowKey, lane });
+			: await finalizeSingleWorktreeHandoff({ worktreeSetup, artifactsDir, runId, cwd: sourceCwd, agent: params.agent!, result: r, workflowKey: params.workflowKey });
 	}
 
 	if (r.progress) allProgress.push(r.progress);
@@ -4026,7 +3996,6 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 		truncation: r.truncation,
 		totalChildUsage: sumResultsUsage([r]),
 		totalCost,
-		usageBudget: usageBudgetState(data.usageBudget, totalCost),
 		...(worktreeHandoff?.reference ? { parallelHandoff: worktreeHandoff.reference } : {}),
 	}));
 	rememberForegroundRun(deps.state, { modelResponseAliases, runId, mode: "single", cwd: singleCwd, sessionId: data.parentSessionId, results: details.results, params, effectiveOutput, effectiveOutputMode, extensionBindings: params.extensionBindings, requiredExtensions });
@@ -4082,7 +4051,6 @@ function duplicateSubagentCallResult(params: SubagentParamsLike): AgentToolResul
 }
 
 const workflowLaunchObservers = new WeakMap<object, (launch: { agent: string; sessionName?: string; sessionFile?: string; async: boolean; runId?: string }) => void>();
-const workflowOwnedUsageBudgets = new WeakMap<object, UsageBudgetConfig>();
 
 /**
  * Terminal-mission retention can remove a mission while its children still
@@ -4176,7 +4144,7 @@ function workflowChildResult(
 	const terminalOutcome = forcedTerminalOutcome
 		?? (result.details.results.some((child) => child.timedOut)
 			? { state: "partial" as const, reason: "timeout" as const }
-			: result.details.usageBudget?.exhausted || result.details.results.some((child) => child.turnBudgetExceeded || child.toolBudgetBlocked)
+			: result.details.results.some((child) => child.turnBudgetExceeded || child.toolBudgetBlocked)
 				? { state: "partial" as const, reason: "budget_exhausted" as const }
 				: undefined);
 	const acceptanceRecovery = result.details.results.find((child) => child.acceptance?.recovery)?.acceptance?.recovery;
@@ -4218,12 +4186,9 @@ function workflowChildResult(
 	const externalProcess = externalResult?.externalProcess ?? externalStatusStep?.externalProcess;
 	const externalAdapter = externalRunner ? externalCliReceiptMetadata({ runner: externalRunner, externalProcess, outputReference }) : undefined;
 	if (externalAdapter) resumability = { state: "not-resumable", reason: externalAdapter.nonResumableReason };
-	const lane = normalizeWorkflowLaneMetadata(childParams.lane, `workflow child '${key}'.lane`);
-	assertWorkflowLaneKey(lane, key, `workflow child '${key}'.lane`);
 	return {
 		key,
 		ok,
-		...(lane ? { lane } : {}),
 		...(terminalOutcome ? { terminalOutcome } : {}),
 		...(resolvedAgents.length === 1 ? { agent: resolvedAgents[0] } : {}),
 		...(runId ? { runId } : {}),
@@ -4413,8 +4378,7 @@ function terminalWorkflowReceipt(
 	return buildWorkflowReceipt({ workflowRunId, state, children, workflowChildren, terminalOutcome, hostSteps, resource, ...(argsDigest ? { argsDigest } : {}) });
 }
 
-function workflowFailureTerminalOutcome(error: unknown, _children: WorkflowScriptChildResult[], usageBudget: ReturnType<typeof usageBudgetState>): WorkflowTerminalOutcome | undefined {
-	if (usageBudget?.exhausted) return { state: "partial", reason: "budget_exhausted" };
+function workflowFailureTerminalOutcome(error: unknown, _children: WorkflowScriptChildResult[]): WorkflowTerminalOutcome | undefined {
 	return error instanceof WorkflowScriptError && error.errorKind === "timeout" ? { state: "partial", reason: "timeout" } : undefined;
 }
 
@@ -4534,8 +4498,6 @@ export function prepareWorkflowLaunchParams(
 	workflowDefaults = workflowDefaultsWithoutCapacity;
 	childParams = childParamsWithoutCapacity;
 	const capabilityCeiling = intersectSubagentCapabilityCeilings(workflowDefaults.capabilityCeiling, options.capabilityCeiling);
-	const lane = normalizeWorkflowLaneMetadata(Object.hasOwn(childParams, "lane") ? childParams.lane : workflowDefaults.lane, `workflow child '${workflowKey}'.lane`);
-	assertWorkflowLaneKey(lane, workflowKey, `workflow child '${workflowKey}'.lane`);
 	const parentTimeoutMs = options.parentDeadlineAt === undefined
 		|| childParams.timeoutMs !== undefined
 		|| childParams.maxRuntimeMs !== undefined
@@ -4572,7 +4534,6 @@ export function prepareWorkflowLaunchParams(
 			workflowParentRunId: parentWorkflowRunId,
 			workflowKey,
 			...(options.outputClaimPath ? { workflowOutputClaimPath: options.outputClaimPath } : {}),
-			...(lane ? { lane } : {}),
 			...(worktree !== undefined ? { worktree: worktree as boolean } : {}),
 			...(baseRef !== undefined ? { baseRef: baseRef as string } : {}),
 			...(outputSchema !== undefined ? { outputSchema } : {}),
@@ -4601,7 +4562,6 @@ export function prepareWorkflowLaunchParams(
 		workflowKey,
 		...(options.outputClaimPath ? { workflowOutputClaimPath: options.outputClaimPath } : {}),
 		...(options.awaitDetachedChild ? { workflowAwaitDetached: true } : {}),
-		...(lane ? { lane } : {}),
 		...(parentTimeoutMs !== undefined ? { workflowParentDeadlineAt: options.parentDeadlineAt } : {}),
 		...(options.runFanoutBudget ? { runFanoutBudget: { ...options.runFanoutBudget, parentPath: `${options.runFanoutBudget.parentPath ? `${options.runFanoutBudget.parentPath}/` : ""}workflow[${workflowKey}]` } } : {}),
 		...(options.suppressRoutineResultIntercom ? { suppressRoutineResultIntercom: true } : {}),
@@ -4647,90 +4607,6 @@ function formatWorkflowValue(value: unknown): string {
 	} catch {
 		return String(value);
 	}
-}
-
-function buildWorkflowLaneGraph(runId: string, lanes: WorkflowLanePlan[], existing?: WorkflowGraphSnapshot): WorkflowGraphSnapshot {
-	const plannedIds = new Set(lanes.flatMap((lane) => lane.stages.map((stage) => stage.generatedKey)));
-	const previousById = new Map((existing?.nodes ?? []).map((node) => [node.id, node]));
-	const nodes: WorkflowGraphNode[] = [];
-	const phases: WorkflowGraphSnapshot["phases"] = [];
-	let flatIndex = 0;
-	for (const lane of lanes) {
-		const nodeIds: string[] = [];
-		for (const [stageIndex, stage] of lane.stages.entries()) {
-			const previous = previousById.get(stage.generatedKey);
-			const outputName = stage.outputName || previous?.outputName;
-			const structured = stage.structured ?? previous?.structured;
-			const node: WorkflowGraphNode = {
-				id: stage.generatedKey,
-				kind: "step",
-				agent: stage.agent ?? previous?.agent,
-				phase: stage.phase ?? previous?.phase,
-				label: stage.label ?? stage.key,
-				status: previous?.status ?? (stageIndex === 0 ? "running" : "pending"),
-				flatIndex,
-				stepIndex: flatIndex,
-				...(outputName ? { outputName } : {}),
-				...(structured !== undefined ? { structured } : {}),
-				...(previous?.acceptanceStatus ? { acceptanceStatus: previous.acceptanceStatus } : {}),
-				...(previous?.error ? { error: previous.error } : {}),
-			};
-			nodes.push(node);
-			nodeIds.push(node.id);
-			flatIndex++;
-		}
-		if (nodeIds.length > 0) phases.push({ title: lane.key, nodeIds });
-	}
-	for (const node of existing?.nodes ?? []) {
-		if (!plannedIds.has(node.id)) nodes.push(node);
-	}
-	for (const phase of existing?.phases ?? []) {
-		const retainedNodeIds = phase.nodeIds.filter((nodeId) => !plannedIds.has(nodeId));
-		if (retainedNodeIds.length === 0) continue;
-		const currentPhase = phases.find((candidate) => candidate.title === phase.title);
-		if (currentPhase) currentPhase.nodeIds.push(...retainedNodeIds);
-		else phases.push({ title: phase.title, nodeIds: retainedNodeIds });
-	}
-	const currentNodeId = nodes.find((node) => node.status === "running")?.id ?? existing?.currentNodeId;
-	return { runId, mode: "workflow", phases, nodes, ...(currentNodeId ? { currentNodeId } : {}) };
-}
-
-function workflowLaneTraceStatus(state: WorkflowScriptTraceEntry["state"]): WorkflowNodeStatus | undefined {
-	switch (state) {
-		case "started":
-			return "running";
-		case "reused":
-			return undefined;
-		case "completed":
-			return "completed";
-		case "failed":
-			return "failed";
-		case "detached":
-			return "detached";
-		case "stopped":
-			return "stopped";
-		default:
-			return undefined;
-	}
-}
-
-function applyWorkflowLaneTrace(graph: WorkflowGraphSnapshot, trace: WorkflowScriptTraceEntry[]): void {
-	const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
-	for (const entry of trace) {
-		if (entry.operation !== "run") continue;
-		const node = nodesById.get(entry.key);
-		if (!node) continue;
-		const status = workflowLaneTraceStatus(entry.state);
-		if (status) node.status = status;
-		if (entry.agent) node.agent = entry.agent;
-		if (entry.phase && (entry.phase !== "auto-resume" || node.phase === undefined)) node.phase = entry.phase;
-		if (entry.label) node.label = entry.label;
-		if (entry.error) node.error = entry.error;
-		else if (status === "completed" || status === "running") delete node.error;
-	}
-	const currentNodeId = graph.nodes.find((node) => node.status === "running")?.id;
-	if (currentNodeId) graph.currentNodeId = currentNodeId;
-	else delete graph.currentNodeId;
 }
 
 function workflowProgressUpdate(
@@ -4834,7 +4710,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		parentModelOverride?: ParentModel | null,
 	): Promise<AgentToolResult<Details>> => {
 		const workflowLaunchObserver = workflowLaunchObservers.get(params);
-		const inheritedUsageBudget = workflowOwnedUsageBudgets.get(params);
 		const delegatedThinkingOverride = delegatedThinkingOverrides.get(params);
 		const allowZeroToolBudget = delegatedZeroToolBudgets.has(params);
 		const delegatedExecution = delegatedExecutions.has(params);
@@ -4931,8 +4806,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			}
 			const parentCwd = ctx.cwd;
 			const timeout = requestParams.timeoutMs ?? requestParams.maxRuntimeMs ?? (requestParams.async === false ? resolveConfigDefaultTimeoutMs(deps.config.timeoutMs) ?? DEFAULT_FOREGROUND_TIMEOUT_MS : undefined);
-			const workflowUsageBudget = validateUsageBudgetConfig(requestParams.usageBudget ?? deps.config.usageBudget, requestParams.usageBudget ? "usageBudget" : "config.usageBudget");
-			if (workflowUsageBudget.error) return buildRequestedModeError(requestParams, workflowUsageBudget.error);
 			const workflowCwd = resolveRequestedCwd(parentCwd, requestParams.cwd);
 			const discoverWorkflowAgents = (cwd: string, scope: AgentScope) => deps.discoverAgents(cwd, scope, workflowParentModel?.provider);
 			const workflowAgents = discoverWorkflowAgents(workflowCwd, resolveExecutionAgentScope(requestParams.agentScope)).agents;
@@ -5399,7 +5272,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					const workflowDeadlineAt = timeout === undefined ? undefined : Date.now() + timeout;
 					const workflowResults: SingleResult[] = [];
 					const workflowChildRunIds = new Map<string, string>();
-					const { args: _args, action: _action, agent: _agent, task: _task, resume: _resume, tasks: _tasks, chain: _chain, concurrency: _concurrency, foregroundOnly: _foregroundOnly, clarify: _clarify, timeoutMs: _timeoutMs, maxRuntimeMs: _maxRuntimeMs, usageBudget: _usageBudget, missionId: _missionId, mission: _mission, preflight: _preflight, globalConcurrencyLimit: _globalConcurrencyLimit, maxSubagentSpawnsPerRun: _maxSubagentSpawnsPerRun, ...workflowChildDefaults } = workflowRequest;
+					const { args: _args, action: _action, agent: _agent, task: _task, resume: _resume, tasks: _tasks, chain: _chain, concurrency: _concurrency, foregroundOnly: _foregroundOnly, clarify: _clarify, timeoutMs: _timeoutMs, maxRuntimeMs: _maxRuntimeMs, missionId: _missionId, mission: _mission, preflight: _preflight, globalConcurrencyLimit: _globalConcurrencyLimit, maxSubagentSpawnsPerRun: _maxSubagentSpawnsPerRun, ...workflowChildDefaults } = workflowRequest;
 					const workflowOutput = typeof workflowChildDefaults.output === "string" || typeof workflowChildDefaults.output === "boolean" ? workflowChildDefaults.output : undefined;
 					const configuredOutputBaseDir = resolveConfiguredSingleRunOutputBaseDir(deps);
 					const workflowAggregateOutputPath = resolveSingleOutputPath(workflowOutput, parentCwd, workflowCwd, resolveSingleRunOutputBaseDir(deps, workflowArtifactsDir, workflowRunId));
@@ -5429,7 +5302,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 							trace: projectedTrace,
 							...(preflightWarnings.length ? { preflightWarnings } : {}),
 						};
-						if (status.workflowGraph) applyWorkflowLaneTrace(status.workflowGraph, trace);
 						const rebuild = trace.length < projectedTraceLength
 							|| (projectedTraceLength > 0 && trace[projectedTraceLength - 1] !== projectedTraceTail);
 						if (rebuild) {
@@ -5564,11 +5436,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 								}
 								deps.refreshResultDelivery?.();
 							},
-							onLanePlan: (lanes) => {
-								status.workflowGraph = buildWorkflowLaneGraph(workflowRunId, lanes, status.workflowGraph);
-								applyWorkflowLaneTrace(status.workflowGraph, status.workflow?.trace ?? []);
-								persist({ tolerateStatusWriteFailure: true });
-							},
 							...(workflowHost ? { host: workflowHost } : {}),
 							onHostStep: (hostStep) => {
 								status = upsertHostStep({ status, hostStep, persist: (nextStatus) => {
@@ -5593,9 +5460,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 								appendWorkflowEvent({ type: "subagent.workflow.emit", value: emits.at(-1) });
 							},
 							launch: async (key, childParams, workflowSignal, admission) => {
-								if (workflowUsageBudget.budget && childParams.async === true) return workflowChildResult(key, buildRequestedModeError(childParams as SubagentParamsLike, "workflow usageBudget does not support async runs.run launches."), childParams, deps.state);
-								const budgetState = usageBudgetState(workflowUsageBudget.budget, sumResultsCost(workflowResults));
-								if (budgetState?.exhausted) return workflowChildResult(key, buildRequestedModeError(childParams as SubagentParamsLike, usageBudgetExceededMessage(budgetState)), childParams, deps.state, { state: "partial", reason: "budget_exhausted" });
 								const childPhase = typeof childParams.phase === "string" && childParams.phase.trim() ? childParams.phase.trim() : undefined;
 								const childLabel = typeof childParams.label === "string" && childParams.label.trim() ? childParams.label.trim() : undefined;
 								recordMissionWorkflowChild(missionBinding, workflowRunId, key, {
@@ -5613,7 +5477,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 										deps.asyncByDefault,
 									);
 									preparedChildParams = childRequest;
-									if (workflowUsageBudget.budget) workflowOwnedUsageBudgets.set(childRequest, workflowUsageBudget.budget);
 									workflowLaunchObservers.set(childRequest, (launch) => {
 										const step = status.steps?.find((candidate) => candidate.workflowKey === key);
 										if (step) {
@@ -5622,7 +5485,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 											step.sessionFile = launch.sessionFile;
 											step.async = launch.async;
 											if (launch.runId) step.runId = launch.runId;
-											if (childRequest.lane) step.lane = childRequest.lane;
 											persist({ tolerateStatusWriteFailure: true });
 										}
 										recordMissionWorkflowChild(missionBinding, workflowRunId, key, { status: "running", agent: launch.agent, ...(launch.sessionFile ? { sessionPath: launch.sessionFile } : {}) });
@@ -5664,7 +5526,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 								if (step) {
 									step.async = step.async === true || Boolean(result.details.asyncId || result.details.asyncDir);
 									if (child.runId) step.runId = child.runId;
-									if (child.lane) step.lane = child.lane;
 								}
 								if (result.details.asyncDir && missionBinding) writeMissionAsyncBinding(result.details.asyncDir, missionBinding);
 								const childStatus = missionWorkflowChildStatus(result);
@@ -5747,7 +5608,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						const outputWarning = writeWorkflowAggregateOutput(workflowAggregateOutputPath, terminalSummary, producedChildOutputPaths);
 						const resultSummary = appendWorkflowOutputWarning(terminalSummary, outputWarning);
 						const receiptState: WorkflowReceiptState = status.state === "complete" ? "complete" : status.state === "paused" ? "paused" : status.state === "stopped" ? "stopped" : "failed";
-						const terminalOutcome = workflowFailureTerminalOutcome(error, partial.children, usageBudgetState(workflowUsageBudget.budget, sumResultsCost(workflowResults)));
+						const terminalOutcome = workflowFailureTerminalOutcome(error, partial.children);
 						const receipt = terminalWorkflowReceipt(workflowRunId, receiptState, partial.children, workflowChildren, terminalOutcome, validHostStepNodes(status.workflowGraph), workflowResource?.provenance, workflowArgsDigest);
 						delete status.workflowReceiptPath;
 						let workflowReceipt: { path: string; receipt: WorkflowReceipt } | undefined;
@@ -5782,7 +5643,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					details: { mode: "workflow", runId: workflowRunId, toolCallId, asyncId: workflowRunId, asyncDir, results: [], ...(workflowPreflight ? { preflight: workflowPreflight } : {}), workflow: status.workflow, workflowChildren: status.workflowChildren, chatProgress, ...(deps.state.activeAsyncCapacity ? { activeAsyncCapacity: deps.state.activeAsyncCapacity } : {}) },
 				}, workflowFanoutBudget));
 			}
-			const { workflowScript: _workflowScript, args: _args, action: _action, agent: _agent, task: _task, resume: _resume, tasks: _tasks, chain: _chain, concurrency: _concurrency, async: _async, foregroundOnly: _foregroundOnly, clarify: _clarify, timeoutMs: _timeoutMs, maxRuntimeMs: _maxRuntimeMs, usageBudget: _usageBudget, chatProgress: _chatProgress, missionId: _missionId, mission: _mission, preflight: _preflight, globalConcurrencyLimit: _globalConcurrencyLimit, maxSubagentSpawnsPerRun: _maxSubagentSpawnsPerRun, ...workflowChildDefaults } = requestParams;
+			const { workflowScript: _workflowScript, args: _args, action: _action, agent: _agent, task: _task, resume: _resume, tasks: _tasks, chain: _chain, concurrency: _concurrency, async: _async, foregroundOnly: _foregroundOnly, clarify: _clarify, timeoutMs: _timeoutMs, maxRuntimeMs: _maxRuntimeMs, chatProgress: _chatProgress, missionId: _missionId, mission: _mission, preflight: _preflight, globalConcurrencyLimit: _globalConcurrencyLimit, maxSubagentSpawnsPerRun: _maxSubagentSpawnsPerRun, ...workflowChildDefaults } = requestParams;
 			const workflowOutput = typeof workflowChildDefaults.output === "string" || typeof workflowChildDefaults.output === "boolean" ? workflowChildDefaults.output : undefined;
 			const configuredOutputBaseDir = resolveConfiguredSingleRunOutputBaseDir(deps);
 			const workflowAggregateOutputPath = resolveSingleOutputPath(workflowOutput, ctx.cwd, workflowCwd, resolveSingleRunOutputBaseDir(deps, workflowArtifactsDir, foregroundWorkflowRunId));
@@ -5862,9 +5723,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						if (delegatedWorkflowPermit && admission.batch) throw new Error("Workflow child permit does not support runs.all.");
 						if (delegatedWorkflowPermit && childParams.resume !== undefined) throw new Error("Workflow child permit does not support retained resume.");
 						if (delegatedWorkflowPermit && childParams.async === true) throw new Error("Workflow child permit supports one foreground child only.");
-						if (workflowUsageBudget.budget && childParams.async === true) return workflowChildResult(key, buildRequestedModeError(childParams as SubagentParamsLike, "workflow usageBudget does not support async runs.run launches."), childParams, deps.state);
-						const budgetState = usageBudgetState(workflowUsageBudget.budget, sumResultsCost(workflowResults));
-						if (budgetState?.exhausted) return workflowChildResult(key, buildRequestedModeError(childParams as SubagentParamsLike, usageBudgetExceededMessage(budgetState)), childParams, deps.state, { state: "partial", reason: "budget_exhausted" });
 						const childPhase = typeof childParams.phase === "string" && childParams.phase.trim() ? childParams.phase.trim() : undefined;
 						const childLabel = typeof childParams.label === "string" && childParams.label.trim() ? childParams.label.trim() : undefined;
 						recordMissionWorkflowChild(missionBinding, foregroundWorkflowRunId, key, {
@@ -5882,7 +5740,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 								deps.asyncByDefault,
 							);
 							preparedChildParams = childRequest;
-							if (workflowUsageBudget.budget) workflowOwnedUsageBudgets.set(childRequest, workflowUsageBudget.budget);
 							if (delegatedWorkflowPermit) {
 								if (childRequest.async !== false) throw new Error("Workflow child permit supports one foreground child only.");
 								const childCwd = resolveRequestedCwd(workflowCwd, childRequest.cwd);
@@ -5960,7 +5817,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				const displayText = appendWorkflowOutputWarning(workflowText, outputWarning);
 				return attachWorkflowMission(withRunFanoutBudget({
 					content: [{ type: "text", text: displayText }],
-					details: compactOptional<Details>({ mode: "workflow", runId: foregroundWorkflowRunId, results: workflowDetailsResults(workflow.children), ...(workflowPreflight ? { preflight: workflowPreflight } : {}), workflowChildren, totalChildUsage: sumResultsUsage(workflowResults), totalCost: sumResultsCost(workflowResults), usageBudget: usageBudgetState(workflowUsageBudget.budget, sumResultsCost(workflowResults)), workflow: { value: workflow.value, trace: finalPreflightTrace, emits: workflow.emits, console: workflow.console, ...workflowArgsEvidence, ...(workflowResource ? { resource: workflowResource.provenance } : {}), ...(finalPreflightWarnings.length ? { preflightWarnings: finalPreflightWarnings } : {}), receipt }, chatProgress }),
+					details: compactOptional<Details>({ mode: "workflow", runId: foregroundWorkflowRunId, results: workflowDetailsResults(workflow.children), ...(workflowPreflight ? { preflight: workflowPreflight } : {}), workflowChildren, totalChildUsage: sumResultsUsage(workflowResults), totalCost: sumResultsCost(workflowResults), workflow: { value: workflow.value, trace: finalPreflightTrace, emits: workflow.emits, console: workflow.console, ...workflowArgsEvidence, ...(workflowResource ? { resource: workflowResource.provenance } : {}), ...(finalPreflightWarnings.length ? { preflightWarnings: finalPreflightWarnings } : {}), receipt }, chatProgress }),
 				}, workflowFanoutBudget));
 			} catch (error) {
 				const partial = error instanceof WorkflowScriptError ? error.partial : { trace: [], emits: [], console: [], children: [] };
@@ -5982,12 +5839,12 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				const outputWarning = writeWorkflowAggregateOutput(workflowAggregateOutputPath, workflowText, producedChildOutputPaths);
 				const displayText = appendWorkflowOutputWarning(workflowText, outputWarning);
 				const workflowChildren = workflowChildSummary({ parentToolCallId: _id, workflowRunId: foregroundWorkflowRunId, workflowState: "failed", inventoryComplete: true, trace: partial.trace, children: partial.children });
-				const terminalOutcome = workflowFailureTerminalOutcome(error, partial.children, usageBudgetState(workflowUsageBudget.budget, sumResultsCost(workflowResults)));
+				const terminalOutcome = workflowFailureTerminalOutcome(error, partial.children);
 				const receipt = terminalWorkflowReceipt(foregroundWorkflowRunId, "failed", partial.children, workflowChildren, terminalOutcome, [...workflowHostSteps.values()], workflowResource?.provenance, workflowArgsDigest);
 				return attachWorkflowMission(withRunFanoutBudget({
 					content: [{ type: "text", text: displayText }],
 					isError: true,
-					details: compactOptional<Details>({ mode: "workflow", runId: foregroundWorkflowRunId, results: workflowDetailsResults(partial.children), ...(workflowPreflight ? { preflight: workflowPreflight } : {}), workflowChildren, totalChildUsage: sumResultsUsage(workflowResults), totalCost: sumResultsCost(workflowResults), usageBudget: usageBudgetState(workflowUsageBudget.budget, sumResultsCost(workflowResults)), workflow: { trace: finalPreflightTrace, emits: partial.emits, console: partial.console, ...workflowArgsEvidence, ...(workflowResource ? { resource: workflowResource.provenance } : {}), ...(finalPreflightWarnings.length ? { preflightWarnings: finalPreflightWarnings } : {}), receipt }, chatProgress }),
+					details: compactOptional<Details>({ mode: "workflow", runId: foregroundWorkflowRunId, results: workflowDetailsResults(partial.children), ...(workflowPreflight ? { preflight: workflowPreflight } : {}), workflowChildren, totalChildUsage: sumResultsUsage(workflowResults), totalCost: sumResultsCost(workflowResults), workflow: { trace: finalPreflightTrace, emits: partial.emits, console: partial.console, ...workflowArgsEvidence, ...(workflowResource ? { resource: workflowResource.provenance } : {}), ...(finalPreflightWarnings.length ? { preflightWarnings: finalPreflightWarnings } : {}), receipt }, chatProgress }),
 				}, workflowFanoutBudget));
 			} finally {
 				workflowProgressClosed = true;
@@ -6023,9 +5880,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				}
 				if (paramsWithResolvedCwd.mode !== "plan") {
 					return { content: [{ type: "text", text: "worktree.cleanup currently supports mode='plan' only; apply/removal is not available yet." }], isError: true, details: { mode: "management", results: [] } };
-				}
-				if (paramsWithResolvedCwd.planId !== undefined) {
-					return { content: [{ type: "text", text: "worktree.cleanup plan mode does not accept planId; apply is not available yet." }], isError: true, details: { mode: "management", results: [] } };
 				}
 				try {
 					const created = createWorktreeCleanupPlan({
@@ -6070,30 +5924,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						{ kind: decision === "confirm" ? "confirmed" : "policy", ...(deps.config.authorityPolicy ? { policy: deps.config.authorityPolicy } : {}) },
 					));
 					return { content: [{ type: "text", text: discarded.text }], details: { mode: "management", results: [] } };
-				} catch (error) {
-					return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: { mode: "management", results: [] } };
-				}
-			}
-			if (action === "lane.status" || action === "lane.recordMerge" || action === "lane.recordSupersession") {
-				if (action !== "lane.status" && deps.allowMutatingManagementActions === false) {
-					return { content: [{ type: "text", text: `Action '${action}' is not available from child-safe subagent fanout mode.` }], isError: true, details: { mode: "management", results: [] } };
-				}
-				const laneId = paramsWithResolvedCwd.laneId?.trim();
-				if (!laneId) return { content: [{ type: "text", text: `${action} requires laneId.` }], isError: true, details: { mode: "management", results: [] } };
-				const handoffPath = paramsWithResolvedCwd.handoffPath?.trim();
-				if (!handoffPath) return { content: [{ type: "text", text: `${action} requires handoffPath for the existing parallel handoff manifest.` }], isError: true, details: { mode: "management", results: [] } };
-				const manifestPath = path.isAbsolute(handoffPath) ? handoffPath : path.resolve(requestCwd, handoffPath);
-				try {
-					if (action === "lane.status") {
-						let manifest;
-						try { manifest = readParallelHandoffManifest(manifestPath); } catch { manifest = undefined; }
-						if (manifest && manifest.runId !== laneId) throw new Error(`Lane '${laneId}' does not match manifest run '${manifest.runId}'.`);
-						return { content: [{ type: "text", text: formatStoredParallelHandoffCleanup(manifestPath, manifest) }], details: { mode: "management", results: [] } };
-					}
-					const recorded = action === "lane.recordMerge"
-						? recordParallelHandoffMerge({ manifestPath, laneId, merge: paramsWithResolvedCwd.merge })
-						: recordParallelHandoffSupersession({ manifestPath, laneId, supersession: paramsWithResolvedCwd.supersession });
-					return { content: [{ type: "text", text: recorded.text }], details: { mode: "management", results: [], parallelHandoff: recorded.reference } };
 				} catch (error) {
 					return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true, details: { mode: "management", results: [] } };
 				}
@@ -6663,8 +6493,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		if (runToolBudget.error) return buildRequestedModeError(effectiveParams, runToolBudget.error);
 		const configToolBudget = resolveToolBudget(deps.config.toolBudget, "config.toolBudget");
 		if (configToolBudget.error) return buildRequestedModeError(effectiveParams, configToolBudget.error);
-		const usageBudget = validateUsageBudgetConfig(effectiveParams.usageBudget ?? deps.config.usageBudget, effectiveParams.usageBudget ? "usageBudget" : "config.usageBudget");
-		if (usageBudget.error) return buildRequestedModeError(effectiveParams, usageBudget.error);
 
 		const scope: AgentScope = resolveExecutionAgentScope(effectiveParams.agentScope);
 		const effectiveCwd = effectiveParams.cwd ?? ctx.cwd;
@@ -6982,8 +6810,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 			nestedRoute,
 			timeoutMs: foregroundTimeout.timeoutMs,
 			toolBudget: runToolBudget.toolBudget,
-			usageBudget: usageBudget.budget,
-			inheritedUsageBudget,
 			allowZeroToolBudget,
 			configToolBudget: configToolBudget.toolBudget,
 			configToolTimeoutMs: deps.config.toolTimeoutMs,

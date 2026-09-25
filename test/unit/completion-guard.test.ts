@@ -788,7 +788,7 @@ test("explicit writer acceptance role overrides reviewer agent heuristics", () =
 test("configured extensions do not rescue clamped-away builtin mutation tools", () => {
 	assert.match(validateImplementationToolContract({
 		agent: "worker",
-		task: "Fix the lane-owned workflowScript launch so writer children get mutation tools.",
+		task: "Fix the workflow-owned workflowScript launch so writer children get mutation tools.",
 		tools: ["read", "grep", "find", "ls"],
 		configuredExtensions: ["/tmp/provider.ts"],
 		requestedTools: ["read", "grep", "find", "ls", "bash", "edit", "write"],

@@ -1872,61 +1872,6 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		fs.rmSync(resultPath, { force: true });
 	});
 
-	it("rejects an invalid async workflow usage budget before creating run state", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		const asyncJobs: SubagentState["asyncJobs"] = new Map();
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, asyncJobs);
-		const runId = `scripted-workflow-invalid-budget-${Date.now()}`;
-
-		const result = await executor.execute(
-			runId,
-			{ workflowScript: `return "unreachable";`, usageBudget: { tokens: { hard: 0 } } },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-
-		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /usageBudget\.tokens\.hard must be a positive number/);
-		assert.equal(result.details.asyncId, undefined);
-		assert.equal(asyncJobs.has(runId), false);
-		assert.equal(fs.existsSync(path.join(DIRS.async, runId)), false);
-		assert.equal(fs.existsSync(path.join(DIRS.results, `${runId}.json`)), false);
-	});
-
-	it("rejects async child launches from budgeted async workflows", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		const executor = makeExecutor([makeAgent("echo")]);
-		const runId = `scripted-workflow-budget-async-child-${Date.now()}`;
-		const started = await executor.execute(
-			runId,
-			{
-				workflowScript: `await runs.run("background", { agent: "echo", task: "Async child", async: true }); return "unreachable";`,
-				usageBudget: { tokens: { hard: 100 } },
-			},
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-
-		assert.equal(started.isError, undefined);
-		assert.ok(started.details.asyncId);
-		assert.notEqual(started.details.asyncId, runId);
-		const resultPath = path.join(DIRS.results, `${started.details.asyncId}.json`);
-		let persisted: { state?: string; summary?: string; results?: Array<{ success?: boolean; output?: string }> } = {};
-		for (let attempt = 0; attempt < 100; attempt++) {
-			if (fs.existsSync(resultPath)) persisted = JSON.parse(fs.readFileSync(resultPath, "utf-8"));
-			if (persisted.state === "failed") break;
-			await new Promise((resolve) => setTimeout(resolve, 20));
-		}
-		assert.equal(persisted.state, "failed");
-		assert.match(persisted.summary ?? "", /workflow usageBudget does not support async runs\.run launches/);
-		assert.equal(persisted.results?.length, 1);
-		assert.equal(persisted.results?.[0]?.success, false);
-		assert.match(persisted.results?.[0]?.output ?? "", /workflow usageBudget does not support async runs\.run launches/);
-		assert.equal(mockPi.callCount(), 0);
-		fs.rmSync(started.details.asyncDir!, { recursive: true, force: true });
-		fs.rmSync(resultPath, { force: true });
-	});
-
 	it("honors an omitted agent async default while awaiting the workflow child result", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		mockPi.onCall({ output: "default async child done" });
 		const executor = makeExecutor([makeAgent("echo", { defaultAsync: true })], {}, false);
@@ -2136,7 +2081,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		const toolCallId = `scripted-workflow-parent-${Date.now()}`;
 		const started = await executor.execute(
 			toolCallId,
-			{ workflowScript: `const child = await runs.run("background", { agent: "echo", task: "Async child", async: true, worktree: true, lane: { version: 1, key: "background", mode: "mutation", sourceRef: "owner/repo#1621", claims: ["feature.txt"] } }); return child.runId;` },
+			{ workflowScript: `const child = await runs.run("background", { agent: "echo", task: "Async child", async: true, worktree: true }); return child.runId;` },
 			new AbortController().signal,
 			undefined,
 			makeMinimalCtx(tempDir),
@@ -2156,30 +2101,24 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		const workflowStatus = JSON.parse(fs.readFileSync(path.join(started.details.asyncDir!, "status.json"), "utf-8")) as AsyncStatus;
 		const workflowStepSessionFile = workflowStatus.steps?.[0]?.sessionFile ?? "";
 		assert.equal(workflowStatus.steps?.[0]?.agent, "echo");
-		assert.deepEqual(workflowStatus.steps?.[0]?.lane, { version: 1, key: "background", mode: "mutation", sourceRef: "owner/repo#1621", claims: ["feature.txt"] });
 		assert.match(workflowStepSessionFile, /session\.jsonl$/);
 		const childDir = path.join(DIRS.async, childRunId);
 		const childStatusPath = path.join(childDir, "status.json");
-		let childStatus: { state?: string; mode?: string; parentWorkflowRunId?: string; workflowKey?: string; lane?: { key: string; mode?: string; sourceRef?: string; claims?: string[] }; steps?: Array<{ lane?: { key: string }; worktreePath?: string; branch?: string }>; parallelHandoff?: { path?: string; changedPatches?: number } } = {};
+		let childStatus: { state?: string; mode?: string; parentWorkflowRunId?: string; workflowKey?: string; steps?: Array<{ worktreePath?: string; branch?: string }>; parallelHandoff?: { path?: string; changedPatches?: number } } = {};
 		for (let attempt = 0; attempt < 200; attempt++) {
 			if (fs.existsSync(childStatusPath)) childStatus = JSON.parse(fs.readFileSync(childStatusPath, "utf-8"));
 			if (["complete", "failed", "stopped"].includes(childStatus.state ?? "")) break;
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		}
 		assert.equal(childStatus.mode, "single");
-		assert.equal(childStatus.parentWorkflowRunId, workflowRunId);
-		assert.equal(childStatus.workflowKey, "background");
-		assert.deepEqual(childStatus.lane, { version: 1, key: "background", mode: "mutation", sourceRef: "owner/repo#1621", claims: ["feature.txt"] });
-		assert.deepEqual(childStatus.steps?.[0]?.lane, childStatus.lane);
 		assert.equal(typeof childStatus.steps?.[0]?.worktreePath, "string");
 		assert.equal(typeof childStatus.steps?.[0]?.branch, "string");
 		assert.equal(typeof childStatus.parallelHandoff?.path, "string");
 		assert.equal(childStatus.parallelHandoff?.changedPatches, 1);
 		assert.equal(fs.existsSync(path.join(tempDir, "feature.txt")), false);
-		const handoff = JSON.parse(fs.readFileSync(childStatus.parallelHandoff!.path!, "utf-8")) as { groups?: Array<{ children?: Array<{ workflowKey?: string; runId?: string; lane?: { key: string }; patch?: { changed?: boolean; filesChanged?: number } }>; cleanup?: { state?: string; tasks?: Array<{ path?: string; preserved?: boolean; worktreeRemoved?: boolean; reason?: string }> } }> };
+		const handoff = JSON.parse(fs.readFileSync(childStatus.parallelHandoff!.path!, "utf-8")) as { groups?: Array<{ children?: Array<{ workflowKey?: string; runId?: string; patch?: { changed?: boolean; filesChanged?: number } }>; cleanup?: { state?: string; tasks?: Array<{ path?: string; preserved?: boolean; worktreeRemoved?: boolean; reason?: string }> } }> };
 		assert.equal(handoff.groups?.[0]?.children?.[0]?.workflowKey, "background");
 		assert.equal(handoff.groups?.[0]?.children?.[0]?.runId, childRunId);
-		assert.equal(handoff.groups?.[0]?.children?.[0]?.lane?.key, "background");
 		assert.equal(handoff.groups?.[0]?.children?.[0]?.patch?.changed, true);
 		assert.equal(handoff.groups?.[0]?.children?.[0]?.patch?.filesChanged, 1);
 		assert.equal(handoff.groups?.[0]?.cleanup?.state, "partial");
@@ -2194,8 +2133,8 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		const childResult = JSON.parse(fs.readFileSync(childResultPath, "utf-8")) as { parentWorkflowRunId?: string; workflowKey?: string };
 		assert.equal(childResult.parentWorkflowRunId, workflowRunId);
 		assert.equal(childResult.workflowKey, "background");
-		const workflowReceipt = JSON.parse(fs.readFileSync(path.join(started.details.asyncDir!, "workflow-receipt.json"), "utf-8")) as { entries?: Record<string, { lane?: { key: string; mode?: string } }> };
-		assert.deepEqual(workflowReceipt.entries?.background?.lane, { version: 1, key: "background", mode: "mutation", sourceRef: "owner/repo#1621", claims: ["feature.txt"] });
+		const workflowReceipt = JSON.parse(fs.readFileSync(path.join(started.details.asyncDir!, "workflow-receipt.json"), "utf-8")) as { entries?: Record<string, { key?: string }> };
+		assert.equal(workflowReceipt.entries?.background?.key, "background");
 		assert.equal(fs.existsSync(workflowStepSessionFile), true);
 		const retainedCwd = handoff.groups?.[0]?.cleanup?.tasks?.[0]?.path;
 		assert.ok(retainedCwd);

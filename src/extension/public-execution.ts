@@ -5,13 +5,9 @@ export interface PublicSubagentExecutionParams {
 	capabilities?: unknown;
 	mode?: unknown;
 	repo?: unknown;
-	planId?: unknown;
 	agent?: unknown;
 	task?: unknown;
 	handoffPath?: unknown;
-	laneId?: unknown;
-	merge?: unknown;
-	supersession?: unknown;
 	step?: unknown;
 	tasks?: unknown;
 	chain?: unknown;
@@ -31,7 +27,6 @@ export interface PublicSubagentExecutionParams {
 	isolation?: unknown;
 	worktree?: unknown;
 	baseRef?: unknown;
-	lane?: unknown;
 	async?: unknown;
 	output?: unknown;
 	resume?: unknown;

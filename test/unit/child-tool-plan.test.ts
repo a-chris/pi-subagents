@@ -215,7 +215,7 @@ describe("production launch path supplies hostAvailableBuiltins", () => {
 					tools: ["read", "grep", "bash"],
 					hostAvailableBuiltins: ["ipython", "bash"],
 				}),
-				/Agent 'scout': tool contract could not be satisfied.*permitted required repository tools \[read, grep\].*lane infrastructure failure/,
+				/Agent 'scout': tool contract could not be satisfied.*permitted required repository tools \[read, grep\].*workflow infrastructure failure/,
 			);
 		} finally {
 			if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
