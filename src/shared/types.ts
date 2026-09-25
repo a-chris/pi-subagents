@@ -15,7 +15,6 @@ import type { ThinkingLevel } from "./model-info.ts";
 import type { GlobalMissionIndexRecord, MissionRecord, MissionStoreConfig } from "../missions/types.ts";
 import type { ExtensionBindings } from "../runs/shared/extension-bindings.ts";
 import type { WorkflowChildPermitContext } from "./workflow-child-permit.ts";
-import type { WatchdogWarningDetails } from "../watchdog/types.ts";
 import type { RequiredChildExtensionSnapshot } from "./required-child-extensions.ts";
 
 // ============================================================================
@@ -822,21 +821,6 @@ export type PublicNestedRunSummary = Pick<
 // Progress Tracking
 // ============================================================================
 
-export interface ChildWatchdogWarningSummary extends Pick<WatchdogWarningDetails, "severity" | "importance" | "category" | "summary" | "evidence" | "recommendedAction" | "displayedAt"> {
-	/** True when a later assistant turn in the child followed the warning. */
-	addressed: boolean;
-	stalemate: boolean;
-}
-
-export interface ChildWatchdogProgress {
-	phase: "idle" | "reviewing" | "stale" | "failed";
-	seq: number;
-	lastUpdate: number;
-	reason?: string;
-	timedOut?: boolean;
-	warnings?: ChildWatchdogWarningSummary[];
-}
-
 export interface AgentProgress {
 	index: number;
 	agent: string;
@@ -866,7 +850,6 @@ export interface AgentProgress {
 	durationMs: number;
 	error?: string;
 	failedTool?: string;
-	watchdog?: ChildWatchdogProgress;
 }
 
 export interface ToolCallSummary {
@@ -1192,7 +1175,6 @@ export interface SingleResult {
 	transcriptPath?: string;
 	transcriptError?: string;
 	children?: NestedRunSummary[];
-	watchdog?: ChildWatchdogProgress;
 	capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 	capabilityAudit?: SubagentCapabilityAudit;
 	runner?: ExternalCliRunnerStatus | ExternalJobRunnerStatus;
@@ -1458,7 +1440,6 @@ export interface NestedStepSummary {
 	startedAt?: number;
 	endedAt?: number;
 	error?: string;
-	watchdog?: ChildWatchdogProgress;
 	timedOut?: boolean;
 	stopped?: boolean;
 	turnBudget?: TurnBudgetState;
@@ -1808,8 +1789,7 @@ export interface AsyncStatus {
 		execution?: ExecutionProjection;
 		review?: ReviewProjection;
 		effects?: EffectsProjection;
-		watchdog?: ChildWatchdogProgress;
-		processTerminal?: ProcessTerminal;
+			processTerminal?: ProcessTerminal;
 		capabilityCeiling?: ResolvedSubagentCapabilityCeiling;
 		capabilityAudit?: SubagentCapabilityAudit;
 	}>;
@@ -2573,7 +2553,7 @@ export const POLL_INTERVAL_MS = 250;
 export const WIDGET_ANIMATION_INTERVAL_MS = 1000;
 export const MAX_WIDGET_JOBS = 4;
 export const DEFAULT_SUBAGENT_MAX_DEPTH = 2;
-export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "guide", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.command", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "watchdog.recommend-model"] as const;
+export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "guide", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.command", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor"] as const;
 
 export const DEFAULT_FORK_PREAMBLE =
 	"You are a delegated subagent running from a fork of the parent session. " +

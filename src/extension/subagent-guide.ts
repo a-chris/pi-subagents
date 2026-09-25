@@ -11,7 +11,6 @@ export const SUBAGENT_GUIDE_TOPICS = [
 	"tool-reference",
 	"configuration",
 	"models",
-	"watchdog",
 	"extension-api",
 ] as const;
 

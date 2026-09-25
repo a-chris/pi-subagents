@@ -45,7 +45,6 @@ import { createResultWatcher } from "../runs/background/result-watcher.ts";
 import { createResultDeliveryOwnership } from "../runs/background/result-delivery-ownership.ts";
 import { registerSlashCommands } from "../slash/slash-commands.ts";
 import { registerPromptTemplateDelegationBridge } from "../slash/prompt-template-bridge.ts";
-import { registerMainWatchdog } from "../watchdog/register-main.ts";
 import { registerSlashSubagentBridge } from "../slash/slash-bridge.ts";
 import { hasLiveSubagentWork, registerPiWebSessionLiveness } from "../integrations/pi-web-session-liveness.ts";
 import { createRetainedNestedRouteTracker } from "../runs/background/retained-nested-route-tracker.ts";
@@ -454,7 +453,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	};
 
 	const waitSubscriptionManager = createWaitSubscriptionManager(pi, state);
-	const mainWatchdog = registerMainWatchdog(pi);
 	const resultDeliveryOwnership = createResultDeliveryOwnership(state);
 	const completionNotifier = registerSubagentNotify(pi, state, { batchConfig: config.completionBatch, ownership: resultDeliveryOwnership });
 	let retainedNestedRouteTracker: ReturnType<typeof createRetainedNestedRouteTracker> | undefined;
@@ -568,7 +566,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		asyncByDefault,
 		waitToolEnabled: waitToolConfig.enabled,
 		waitToolDefaultTimeoutMs: waitToolConfig.defaultTimeoutMs,
-		watchdog: mainWatchdog,
 		tempArtifactsDir,
 		getSubagentSessionRoot,
 		expandTilde,
@@ -1021,7 +1018,6 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			stopResultWatcher();
 			resultDeliveryOwnership.clear();
 			completionNotifier.dispose();
-			mainWatchdog.dispose();
 			waitSubscriptionManager.dispose();
 			fleetStatus?.dispose();
 			disposeAsyncJobTracker();
