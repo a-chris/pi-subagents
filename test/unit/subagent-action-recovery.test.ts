@@ -69,10 +69,10 @@ describe("subagent action recovery", () => {
 		assert.equal(result.content[0]?.text, unknownSubagentActionMessage("statsu"));
 	});
 
-	it("lists and suggests mission decision resolution", () => {
-		const message = unknownSubagentActionMessage("mission.resolve-decison");
+	it("lists and suggests mission creation", () => {
+		const message = unknownSubagentActionMessage("mission.createe");
 
-		assert.match(message, /Did you mean mission\.resolve-decision\?/);
-		assert.match(message, /Valid: .*mission\.resolve-decision/);
+		assert.match(message, /Did you mean mission\.create\?/);
+		assert.match(message, /Valid: .*mission\.create/);
 	});
 });

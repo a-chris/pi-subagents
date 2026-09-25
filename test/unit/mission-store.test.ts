@@ -131,8 +131,6 @@ describe("mission store", () => {
 				artifactPaths: ["/tmp/review.md"],
 				heartbeat: { status: "completed", phase: "review", updatedAt: "2026-08-11T10:05:00.000Z" },
 			});
-			const shown = handleMissionAction("mission.show", { missionId: mission.id }, { cwd: test.projectRoot, agentDir: test.agentDir });
-			assert.match(shown.content[0]?.type === "text" ? shown.content[0].text : "", /review \(child-1\): completed — reviewer \[review\]; updated .*; heartbeat completed\/review at/);
 		} finally {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}
@@ -141,16 +139,11 @@ describe("mission store", () => {
 	it("gates a mission on open decisions and resolves them explicitly", () => {
 		const test = fixture();
 		try {
-			const ctx = { cwd: test.projectRoot, agentDir: test.agentDir };
 			const mission = createMission(test.location, { title: "Decision gate", objective: "Wait for owner", status: "active" });
-			const pending = handleMissionAction("mission.update", {
-				missionId: mission.id,
-				missionUpdate: { decisions: [{ title: "Choose release window", options: ["now", "later"], recommendation: "later" }] },
-			}, ctx);
-			const decisionId = pending.details?.mission?.decisions[0]?.id;
+			const pending = updateMission(test.location, mission.id, { addDecisions: [{ title: "Choose release window", options: ["now", "later"], recommendation: "later" }] });
+			const decisionId = pending.decisions[0]?.id;
 			assert.ok(decisionId);
-			assert.equal(pending.details?.mission?.status, "needs_decision");
-			assert.match(handleMissionAction("mission.list", {}, ctx).content[0]?.type === "text" ? handleMissionAction("mission.list", {}, ctx).content[0].text : "", /decisions: 1 open, 0 resolved/);
+			assert.equal(pending.status, "needs_decision");
 
 			const refreshed = updateMission(test.location, mission.id, {
 				status: "active",
@@ -158,12 +151,11 @@ describe("mission store", () => {
 			});
 			assert.equal(refreshed.status, "needs_decision");
 
-			const resolved = handleMissionAction("mission.resolve-decision", { missionId: mission.id, id: decisionId, summary: "Release later" }, ctx);
-			assert.equal(resolved.details?.mission?.status, "active");
-			assert.equal(resolved.details?.mission?.decisions[0]?.status, "resolved");
-			assert.equal(resolved.details?.mission?.decisions[0]?.resolution, "Release later");
-			assert.match(resolved.content[0]?.type === "text" ? resolved.content[0].text : "", /resolved — Choose release window; resolution: Release later/);
-			assert.throws(() => handleMissionAction("mission.resolve-decision", { missionId: mission.id, id: decisionId, summary: "Again" }, ctx), /already resolved/);
+			const resolved = updateMission(test.location, mission.id, { resolveDecision: { id: decisionId, resolution: "Release later" } });
+			assert.equal(resolved.status, "active");
+			assert.equal(resolved.decisions[0]?.status, "resolved");
+			assert.equal(resolved.decisions[0]?.resolution, "Release later");
+			assert.throws(() => updateMission(test.location, mission.id, { resolveDecision: { id: decisionId, resolution: "Again" } }), /already resolved/);
 		} finally {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}
@@ -434,65 +426,16 @@ describe("mission store", () => {
 		}
 	});
 
-	it("shows missions with warnings when linked run status is unreadable", () => {
+	it("creates a mission with structured details", () => {
 		const test = fixture();
 		try {
 			const ctx = { cwd: test.projectRoot, agentDir: test.agentDir, currentSessionId: "session-1" };
-			const created = handleMissionAction("mission.create", { mission: { title: "Unreadable status", objective: "Keep mission readable" } }, ctx);
+			const created = handleMissionAction({ mission: { title: "Action mission", objective: "Exercise actions" } }, ctx);
 			const missionId = created.details?.missionId;
 			assert.ok(missionId);
-			const asyncDir = path.join(test.root, "async-run");
-			fs.mkdirSync(asyncDir, { recursive: true });
-			handleMissionAction("mission.attach-run", { missionId, runId: "run-3", runMode: "single", runStatus: "running", dir: asyncDir }, ctx);
-			fs.writeFileSync(path.join(asyncDir, "status.json"), "{not json", "utf-8");
-
-			const shown = handleMissionAction("mission.show", { missionId }, ctx);
-
-			assert.equal(shown.details?.mission?.runs[0]?.status, "running");
-			assert.match(shown.content[0]?.type === "text" ? shown.content[0].text : "", /Warning: Failed to read linked run status/);
-			assert.equal(shown.details?.missions?.warnings?.length, 1);
-		} finally {
-			fs.rmSync(test.root, { recursive: true, force: true });
-		}
-	});
-
-	it("supports the mission management actions with structured details", () => {
-		const test = fixture();
-		try {
-			const ctx = { cwd: test.projectRoot, agentDir: test.agentDir, currentSessionId: "session-1" };
-			const created = handleMissionAction("mission.create", { mission: { title: "Action mission", objective: "Exercise actions" } }, ctx);
-			const missionId = created.details?.missionId;
-			assert.ok(missionId);
-			const asyncDir = path.join(test.root, "async-run");
-			fs.mkdirSync(asyncDir, { recursive: true });
-			const attached = handleMissionAction("mission.attach-run", { missionId, runId: "run-2", runMode: "parallel", runStatus: "running", dir: asyncDir }, ctx);
-			assert.equal(attached.details?.mission?.runs[0]?.runId, "run-2");
-			fs.writeFileSync(path.join(asyncDir, "status.json"), JSON.stringify({ state: "complete" }), "utf-8");
-			const shown = handleMissionAction("mission.show", { missionId }, ctx);
-			assert.equal(shown.details?.mission?.status, "completed");
-			assert.match(shown.content[0]?.type === "text" ? shown.content[0].text : "", new RegExp(`State: .*${missionId}[/\\\\]state\\.json`));
-			assert.equal(shown.details?.mission?.runs[0]?.status, "complete");
-			const receipt = handleMissionAction("mission.update", {
-				missionId,
-				missionUpdate: {
-					receipts: [{ kind: "ci", status: "succeeded", title: "Unit tests", url: "https://github.com/example/repo/actions/runs/1", description: "All checks passed" }],
-				},
-			}, ctx);
-			assert.equal(receipt.details?.mission?.receipts[0]?.status, "succeeded");
-			assert.match(receipt.content[0]?.type === "text" ? receipt.content[0].text : "", /Delivery receipts:\n  ci \(succeeded\): Unit tests/);
-			const updatedReceipt = handleMissionAction("mission.update", {
-				missionId,
-				missionUpdate: { receipts: [{ kind: "ci", status: "ready", title: "Unit tests", url: "https://github.com/example/repo/actions/runs/1" }] },
-			}, ctx);
-			assert.equal(updatedReceipt.details?.mission?.receipts.length, 1);
-			assert.equal(updatedReceipt.details?.mission?.receipts[0]?.status, "ready");
-			const closed = handleMissionAction("mission.close", { missionId, missionStatus: "completed", summary: "Done" }, ctx);
-			assert.equal(closed.details?.mission?.status, "completed");
-			const global = handleMissionAction("mission.list", { missionScope: "global" }, ctx);
-			assert.equal(global.details?.missions?.globalEntries?.length, 1);
-			assert.throws(() => handleMissionAction("mission.list", { missionScope: "everywhere" as "global" }, ctx), /missionScope/);
-			assert.throws(() => handleMissionAction("mission.update", { missionId, missionUpdate: { unsupported: true } as never }, ctx), /unknown/);
-			assert.throws(() => handleMissionAction("mission.update", { missionId, missionUpdate: { receipts: [{ kind: "ci", status: "ready", title: "Bad URL", url: "relative" }] } as never }, ctx), /absolute URL/);
+			assert.equal(created.details?.mission?.status, "planned");
+			assert.match(created.content[0]?.type === "text" ? created.content[0].text : "", new RegExp(`Created mission ${missionId}: Action mission`));
+			assert.equal(listGlobalMissions(test.location.globalIndexDir).entries[0]?.missionId, missionId);
 		} finally {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}

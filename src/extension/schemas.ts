@@ -237,7 +237,6 @@ const MissionLaunchOverride = Type.Unsafe({
 		{ type: "boolean" },
 	],
 });
-const MissionUpdateOverride = Type.Unsafe({ type: "object", additionalProperties: true });
 
 const ControlOverrides = Type.Object({
 	enabled: Type.Optional(Type.Boolean({ description: "Enable/disable subagent control attention tracking for this run" })),
@@ -287,14 +286,7 @@ const SubagentParamProperties = {
 	steeringRecovery: Type.Optional(Type.Boolean({ description: "steer: pause/revive after missed acknowledgment; default true in direct steer mode, forced false by extension RPC for exact ownership." })),
 	additional: Type.Optional(Type.Integer({ minimum: 1, description: "grant-spawn-budget: root interactive parent + native user confirmation only; total grants capped at original configured cap." })),
 	focus: Type.Optional(Type.Boolean({ description: "Focus inspector.open/project.open pane." })),
-	missionId: Type.Optional(Type.String()),
 	mission: Type.Optional(Type.Unsafe({ ...MissionLaunchOverride, description: "false disables; true invalid. Object: exactly one non-empty title or summary; objective/labels optional; goal only true, requires budget.tokens." })),
-	missionUpdate: Type.Optional(Type.Unsafe({ ...MissionUpdateOverride, description: "Mission patch; read guide missions." })),
-	missionStatus: Type.Optional(Type.String()),
-	missionScope: Type.Optional(Type.String({ description: "project (default) or global pointer index." })),
-	runMode: Type.Optional(Type.String({ description: "Attached run mode." })),
-	runStatus: Type.Optional(Type.String({ description: "Attached run status." })),
-	summary: Type.Optional(Type.String({ description: "Mission close summary." })),
 	// Agent configuration for create/update (nested to avoid conflicts with execution fields)
 	config: Type.Optional(Type.Unsafe({
 		anyOf: [

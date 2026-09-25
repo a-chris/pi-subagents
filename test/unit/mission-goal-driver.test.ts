@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import { handleMissionAction } from "../../src/missions/actions.ts";
 import { collectGoalContinuationNotices } from "../../src/missions/goal-driver.ts";
 import { createMission, readMission, resolveMissionStoreLocation, updateMission } from "../../src/missions/store.ts";
 import { missionStatePath } from "../../src/missions/workflow-state.ts";
@@ -163,16 +162,20 @@ describe("goal mission continuation", () => {
 		}
 	});
 
-	it("supports pause, resume, and opt-out through mission.update", () => {
+	it("supports goal pause, resume, and opt-out through the mission record", () => {
 		const test = fixture();
 		try {
-			const ctx = { cwd: test.projectRoot, agentDir: path.join(test.root, "agent"), currentSessionId: "session-1" };
-			const created = handleMissionAction("mission.create", { mission: { title: "Goal controls", objective: "Exercise controls", goal: true, budget: { tokens: 50 } } }, ctx);
-			const missionId = created.details!.missionId!;
-			assert.equal(handleMissionAction("mission.update", { missionId, missionUpdate: { goal: { paused: true } } }, ctx).details?.mission?.goal?.status, "paused");
+			const mission = createMission(test.location, {
+				title: "Goal controls",
+				objective: "Exercise controls",
+				goal: true,
+				budget: { tokens: 50 },
+				status: "planned",
+			});
+			assert.equal(updateMission(test.location, mission.id, { goal: { status: "paused" } }).goal?.status, "paused");
 			assert.deepEqual(collectGoalContinuationNotices({ location: test.location, ownerSessionId: "session-1", retainedChildren: [], turnId: 1 }), []);
-			assert.equal(handleMissionAction("mission.update", { missionId, missionUpdate: { goal: { paused: false } } }, ctx).details?.mission?.goal?.status, "active");
-			assert.equal(handleMissionAction("mission.update", { missionId, missionUpdate: { goal: false } }, ctx).details?.mission?.goal, undefined);
+			assert.equal(updateMission(test.location, mission.id, { goal: { status: "active" } }).goal?.status, "active");
+			assert.equal(updateMission(test.location, mission.id, { goal: false }).goal, undefined);
 		} finally {
 			fs.rmSync(test.root, { recursive: true, force: true });
 		}

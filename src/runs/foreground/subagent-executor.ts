@@ -185,8 +185,8 @@ import {
 import { generateContextBrief, wrapPrequelTask, wrapSummaryTask } from "../../shared/context-brief.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 
-const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "mission.create", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "refine", "refine.rollback", "dismiss"]);
-const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["delete", "eject", "disable", "reset", "mission.close", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt"]);
+const MUTATING_MANAGEMENT_ACTIONS = new Set(["create", "update", "delete", "eject", "disable", "enable", "reset", "grant-spawn-budget", "mission.create", "inspector.open", "inspector.close", "project.open", "project.close", "worktree.discard", "worktree.cleanup", "refine", "refine.rollback", "dismiss"]);
+const DESTRUCTIVE_MANAGEMENT_ACTIONS = new Set(["delete", "eject", "disable", "reset", "worktree.discard", "refine.rollback", "inspector.close", "project.close", "stop", "interrupt"]);
 
 function resolveSteerDeliveryMode(mode: SubagentParamsLike["mode"]): SteerDeliveryMode | undefined {
 	return mode === "steer" || mode === "follow_up" || mode === "auto" ? mode : undefined;
@@ -393,12 +393,6 @@ export interface SubagentParamsLike {
 	additional?: number;
 	missionId?: string;
 	mission?: unknown;
-	missionUpdate?: unknown;
-	missionStatus?: string;
-	missionScope?: string;
-	runMode?: string;
-	runStatus?: string;
-	summary?: string;
 }
 
 function rememberParentModel(state: { currentSessionId?: string | null; lastParentModel?: ParentModel }, sessionId: string | null, model: unknown): ParentModel | undefined {
@@ -5903,7 +5897,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					};
 				}
 				const currentSessionId = deps.state.currentSessionId ?? ctx.sessionManager.getSessionId() ?? undefined;
-				return handleMissionAction(action as (typeof MISSION_ACTIONS)[number], paramsWithResolvedCwd, {
+				return handleMissionAction(paramsWithResolvedCwd, {
 					cwd: requestCwd,
 					...(deps.config.missions ? { config: deps.config.missions } : {}),
 					...(currentSessionId ? { currentSessionId } : {}),
