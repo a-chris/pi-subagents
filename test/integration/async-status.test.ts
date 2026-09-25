@@ -157,7 +157,7 @@ describe("async status helpers", () => {
 		}
 	});
 
-	it("reports the planned runs.lanes stage count while the first child is running", () => {
+	it("reports the planned workflow stage count while the first child is running", () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-async-status-staged-lane-"));
 		try {
 			const runId = "run-staged-lane";

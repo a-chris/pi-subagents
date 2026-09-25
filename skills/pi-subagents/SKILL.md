@@ -105,4 +105,4 @@ For an authorized complex delegated workflow, read `prompting-and-roles.md` and
 - Preserve parent authority and escalate unresolved choices.
 - Treat receipts, CI, review bots, and external-run records as evidence, not authority.
 - For backlog maintenance, releases, merge queues, or other public-repo mutation policy, load the matching user/project skill. This package defines delegation primitives, not private policy.
-- As a conservative orchestration policy, do not pass a hard `toolBudget` or tight `usageBudget` to mutation-capable workers. The default tool budget blocks read/search tools rather than mutation tools. If interrupted after a tool call starts, checkpoint after the current tool returns with changed files, build/test state, and commit or PR state.
+- As a conservative orchestration policy, do not pass a hard `toolBudget` to mutation-capable workers. The default tool budget blocks read/search tools rather than mutation tools. If interrupted after a tool call starts, checkpoint after the current tool returns with changed files, build/test state, and commit or PR state.

@@ -271,7 +271,7 @@ describe("async status projection", () => {
 		assert.equal(rows[0]?.preflight?.mode, "review");
 	});
 
-	it("projects known runs.lanes stages from the workflow graph, including pending stages", () => {
+	it("projects known planned workflow stages from the workflow graph, including pending stages", () => {
 		const rows = projectAsyncWorkflowRows([{
 			agent: "scout",
 			workflowKey: "issue-1695.scope-scout",
