@@ -673,3 +673,126 @@ describe("SubagentParams schema", { skip: !schemasAvailable ? "typebox not avail
 		}
 	});
 });
+
+describe("M1 facade schemas", { skip: !schemasAvailable ? "typebox not available" : undefined }, () => {
+	function properties(schema: unknown): Record<string, JsonSchemaNode> {
+		const props = (schema as JsonSchemaNode | undefined)?.properties;
+		return (props && typeof props === "object" ? props : {}) as Record<string, JsonSchemaNode>;
+	}
+
+	it("delegation facade matches the target shape", () => {
+		const delegation = schemas.SubagentDelegationParams as JsonSchemaNode;
+		assert.ok(delegation, "SubagentDelegationParams schema should exist");
+		const props = properties(delegation);
+		assert.deepEqual(delegation.required, ["task"]);
+		assert.deepEqual(Object.keys(props).sort(), [
+			"agent", "async", "cwd", "output", "prequel", "reads", "task", "worktree",
+		].sort());
+		assert.equal(props.task?.type, "string");
+		assert.match(String(props.task?.description ?? ""), /action to do or problem to solve/);
+		assert.equal(props.prequel?.type, "string");
+		assert.match(String(props.prequel?.description ?? ""), /separate from task/i);
+		assert.match(String(props.prequel?.description ?? ""), /fork\|summary/);
+		assert.match(String(props.prequel?.description ?? ""), /fresh/);
+		assert.equal(props.async?.type, "boolean");
+		assert.equal(props.worktree?.type, "boolean");
+		assert.equal(props.cwd?.type, "string");
+		assert.equal(props.reads?.type, "array");
+		assert.equal((props.reads?.items as JsonSchemaNode | undefined)?.type, "string");
+		assert.equal(hasAnyOfType(props.output, "string"), true);
+		assert.equal(hasAnyOfType(props.output, "boolean"), true);
+	});
+
+	it("workflow facade matches the target shape", () => {
+		const workflow = schemas.SubagentWorkflowParams as JsonSchemaNode;
+		assert.ok(workflow, "SubagentWorkflowParams schema should exist");
+		const props = properties(workflow);
+		assert.deepEqual(Object.keys(props).sort(), [
+			"args", "async", "baseRef", "source", "workflow", "worktree",
+		].sort());
+		assert.equal(props.workflow?.type, "string");
+		assert.equal(props.async?.type, "boolean");
+		assert.equal(props.worktree?.type, "boolean");
+		assert.equal(props.baseRef?.type, "string");
+		assert.equal(hasAnyOfType(props.source, "string"), true);
+		const sourceObjectBranch = anyOfBranches(props.source).find((branch) => branch.type === "object") ?? {};
+		const pathProp = (sourceObjectBranch.properties as Record<string, JsonSchemaNode> | undefined)?.path;
+		assert.equal(pathProp?.type, "string");
+		assert.equal(props.args?.type, "object");
+	});
+
+	it("control facade matches the target shape with a closed action enum", () => {
+		const control = schemas.SubagentControlParams as JsonSchemaNode;
+		assert.ok(control, "SubagentControlParams schema should exist");
+		const props = properties(control);
+		assert.deepEqual(Object.keys(props).sort(), ["action", "id", "message"].sort());
+		assert.equal(props.id?.type, "string");
+		assert.equal(props.message?.type, "string");
+		assert.equal(props.action?.type, "string");
+		assert.deepEqual(props.action?.enum, [
+			"status", "resume", "steer", "stop", "interrupt", "validate",
+			"list", "get", "models", "guide", "mission.create",
+		]);
+	});
+
+	it("keeps exactly the declared cross-cutting params shared and all others one-per-tool", () => {
+		// async and worktree are identical-meaning execution switches shared by
+		// the delegation and workflow facades by design. Every other param name
+		// must appear on exactly one facade, and the exempt set may never grow.
+		const exempt = new Set(["async", "worktree"]);
+		const deleg = new Set(Object.keys(properties(schemas.SubagentDelegationParams)));
+		const workflows = new Set(Object.keys(properties(schemas.SubagentWorkflowParams)));
+		const control = new Set(Object.keys(properties(schemas.SubagentControlParams)));
+
+		const occurrences = new Map<string, number>();
+		for (const name of [...deleg, ...workflows, ...control]) occurrences.set(name, (occurrences.get(name) ?? 0) + 1);
+		for (const [name, count] of occurrences) {
+			if (count < 2) continue;
+			assert.ok(exempt.has(name), `param ${name} appears on ${count} facades but is not in the allowed shared set`);
+			assert.equal(count, 2, `shared param ${name} should appear on exactly two facades`);
+		}
+		// The exempt set is fixed: a third colliding name (or one landing on
+		// three facades) fails the test.
+		assert.deepEqual(
+			[...exempt].filter((name) => (occurrences.get(name) ?? 0) > 1).sort(),
+			["async", "worktree"],
+		);
+	});
+
+	it("renders the three facade schemas compactly (under 3000 bytes total)", () => {
+		const total = JSON.stringify(schemas.SubagentDelegationParams).length
+			+ JSON.stringify(schemas.SubagentWorkflowParams).length
+			+ JSON.stringify(schemas.SubagentControlParams).length;
+		assert.ok(total < 3000, `expected facade schemas under 3000 chars, got ${total}`);
+	});
+
+	it("projects shared facade fields by reference (no drift from the internal pool)", () => {
+		const internal = (SubagentParams?.properties ?? {}) as Record<string, JsonSchemaNode>;
+		const delegationProps = properties(schemas.SubagentDelegationParams);
+		const workflowProps = properties(schemas.SubagentWorkflowParams);
+		const controlProps = properties(schemas.SubagentControlParams);
+		const sharedByFacade: string[][] = [
+			["task", "agent", "cwd", "async", "worktree", "output"],
+			["async", "worktree", "baseRef"],
+			["id", "message"],
+		];
+		const facades = [delegationProps, workflowProps, controlProps];
+		const stripDescription = (node: JsonSchemaNode | undefined): JsonSchemaNode | undefined => {
+			if (!node || typeof node !== "object") return node;
+			return Object.fromEntries(Object.entries(node).filter(([key]) => key !== "description"));
+		};
+		for (let facadeIndex = 0; facadeIndex < facades.length; facadeIndex += 1) {
+			for (const name of sharedByFacade[facadeIndex] ?? []) {
+				const facadeField = facades[facadeIndex]?.[name];
+				const internalField = internal[name];
+				assert.ok(facadeField, `facade field ${name} should exist`);
+				assert.ok(internalField, `internal pool field ${name} should exist`);
+				assert.deepEqual(
+					stripDescription(facadeField as JsonSchemaNode),
+					stripDescription(internalField),
+					`projected field ${name} shape should match the internal pool (no drift)`,
+				);
+			}
+		}
+	});
+});

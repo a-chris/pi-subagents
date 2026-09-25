@@ -2,7 +2,7 @@
  * TypeBox schemas for subagent tool parameters
  */
 
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 
 function keepTopLevelParameterDescriptions<T>(schema: T): T {
 	return pruneNestedDescriptions(schema, []) as T;
@@ -395,6 +395,109 @@ export const SubagentParams = keepTopLevelParameterDescriptions(SubagentParamsSc
 export function createSubagentParamsSchema(): typeof SubagentParams {
 	return SubagentParams;
 }
+
+// ---------------------------------------------------------------------------
+// Model-facing facade schemas (M1): three small tools replace the single flat
+// 81-param surface. Shared fields are DERIVED projections OF `SubagentParamProperties`
+// BY REFERENCE so their types/shapes are single-sourced with the internal contract
+// and can never drift. Description overrides are the facade layer and sit in one
+// central place next to each facade (keepTopLevelParameterDescriptions ships only
+// top-level descriptions). `async` and `worktree` are identical-meaning execution
+// switches shared by the delegation and workflow facades; every other param lives
+// on exactly one tool.
+// ---------------------------------------------------------------------------
+
+type PoolKey = keyof typeof SubagentParamProperties;
+
+// Project one shared field FROM THE INTERNAL POOL BY REFERENCE so its type and
+// shape are single-sourced with the internal contract and cannot drift. Return
+// type preserves the pool field's own TypeBox schema type.
+function poolField<K extends PoolKey>(key: K): (typeof SubagentParamProperties)[K] {
+	return SubagentParamProperties[key];
+}
+
+// Clone a schema node preserving TypeBox metadata (incl. the optional marker),
+// then set a fresh facade-level description. Shape stays identical to the pool;
+// only the description is the facade layer.
+function withFacadeDescription<T extends TSchema>(schemaNode: T, description: string): T {
+	// SAFETY: schemaNode is always an object-shaped TypeBox schema node.
+	const source = schemaNode as object;
+	// SAFETY: cloning from the prototype yields the same schema shape; the cast
+	// keeps the TypeBox schema type through descriptor-copy and re-description.
+	const result = Object.create(Object.getPrototypeOf(source)) as T;
+	for (const key of Reflect.ownKeys(source)) {
+		const descriptor = Object.getOwnPropertyDescriptor(source, key);
+		if (descriptor) {
+			// SAFETY: the descriptor belongs to the source node; redefining it on the clone preserves non-enumerable TypeBox metadata.
+			Object.defineProperty(result as object, key, descriptor);
+		}
+	}
+	// SAFETY: re-adding an enumerable `description` is the facade layer on top of the internal shape.
+	Object.defineProperty(result as object, "description", { value: description, enumerable: true, writable: true, configurable: true });
+	return result;
+}
+
+// --- subagent (delegate one child) -----------------------------------------
+// Central facade-layer descriptions: types come from the pool (poolField), and
+// only descriptions (and the purely-facade prequel/reads fields) are authored here.
+const delegationDescriptions = {
+	task: "The action to do or problem to solve.",
+	agent: "One of the installed agent names (via subagent_control action:list). Default agent when omitted.",
+	cwd: "Working directory; default: session directory.",
+	async: "Background run; default false.",
+	output: "Durable result path, or false.",
+	worktree: "Isolate in a managed git worktree; default false.",
+};
+const delegationProperties = {
+	task: withFacadeDescription(poolField("task"), delegationDescriptions.task),
+	agent: withFacadeDescription(poolField("agent"), delegationDescriptions.agent),
+	cwd: withFacadeDescription(poolField("cwd"), delegationDescriptions.cwd),
+	async: withFacadeDescription(poolField("async"), delegationDescriptions.async),
+	output: withFacadeDescription(poolField("output"), delegationDescriptions.output),
+	worktree: withFacadeDescription(poolField("worktree"), delegationDescriptions.worktree),
+	// Newly introduced fields, not on the internal contract yet (M2 wires prequel).
+	prequel: Type.Optional(Type.String({ description: "Current state of the work and what led here — separate from task. Consumed when the agent's declared context mode is fork|summary; stays empty with fresh." })),
+	reads: Type.Optional(Type.Array(Type.String(), { description: "Task-specific file paths the child reads before running; the agent's defaultReads still apply." })),
+};
+export const SubagentDelegationParams = keepTopLevelParameterDescriptions(Type.Object(delegationProperties, { required: ["task"] }));
+
+// --- subagent_workflow (run a workflow) ------------------------------------
+const workflowDescriptions = {
+	workflow: "Named workflow resource, e.g. \"review\" or \"run-ci\".",
+	source: "Inline script body, or { path } to a script file.",
+	args: "Bounded JSON inputs for the workflow.",
+	async: "Background run; default false.",
+	worktree: "Isolate in a managed git worktree; default false.",
+	baseRef: "Branch/ref for worktree isolation.",
+};
+const workflowProperties = {
+	// Facade-layer fields: plan Target shapes differ from the pool for these.
+	workflow: Type.Optional(Type.String({ description: workflowDescriptions.workflow })),
+	source: Type.Optional(Type.Unsafe<string | { path?: string }>({ anyOf: [{ type: "string" }, { type: "object", properties: { path: { type: "string" } } }], description: workflowDescriptions.source })),
+	args: Type.Optional(Type.Unsafe<object>({ type: "object", description: workflowDescriptions.args })),
+	async: withFacadeDescription(poolField("async"), workflowDescriptions.async),
+	worktree: withFacadeDescription(poolField("worktree"), workflowDescriptions.worktree),
+	baseRef: withFacadeDescription(poolField("baseRef"), workflowDescriptions.baseRef),
+};
+export const SubagentWorkflowParams = keepTopLevelParameterDescriptions(Type.Object(workflowProperties));
+
+export const SUBAGENT_CONTROL_ACTIONS = [
+	"status", "resume", "steer", "stop", "interrupt", "validate",
+	"list", "get", "models", "guide", "mission.create",
+] as const;
+
+// --- subagent_control (control runs by id) --------------------------------
+const controlDescriptions = {
+	id: "Run id/prefix; required for run-targeting actions.",
+	action: "What to do; omitted = status.",
+	message: "Guidance for steer/resume.",
+};
+const controlProperties = {
+	id: withFacadeDescription(poolField("id"), controlDescriptions.id),
+	action: Type.Optional(Type.String({ enum: [...SUBAGENT_CONTROL_ACTIONS], description: controlDescriptions.action })),
+	message: withFacadeDescription(poolField("message"), controlDescriptions.message),
+};
+export const SubagentControlParams = keepTopLevelParameterDescriptions(Type.Object(controlProperties));
 
 const SubagentWaitParamsSchema = Type.Object({
 	id: Type.Optional(Type.String({

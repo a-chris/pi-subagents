@@ -34,7 +34,8 @@ import { clearLegacyResultAnimationTimer, renderSubagentResult, renderSubagentSu
 import { openSubagentFleet } from "../tui/fleet.ts";
 import { createBuiltinInspectorPlugins } from "../inspectors/plugins.ts";
 import { SubagentFleetStatus, resolveFleetViewPlacement } from "../tui/fleet-status.ts";
-import { createSubagentParamsSchema } from "./schemas.ts";
+import { SubagentControlParams, SubagentDelegationParams, SubagentWorkflowParams } from "./schemas.ts";
+import { createSubagentFacadeExecute, isWorkflowSourceObject, type SubagentControlFacadeParams, type SubagentDelegationFacadeParams, type SubagentWorkflowFacadeParams } from "./facade.ts";
 import { createSubagentExecutor, type SubagentParamsLike } from "../runs/foreground/subagent-executor.ts";
 import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { getActiveAsyncCapacitySnapshot, resolveAbandonedSlotReleaseAfterMs, resolveMaxActiveAsyncRunsPerSession } from "../runs/background/active-async-capacity.ts";
@@ -62,7 +63,7 @@ import { disposeChildSessions } from "../runs/shared/child-session.ts";
 import { resolveCurrentSubagentCapabilityCeiling } from "../runs/shared/capability-ceiling.ts";
 import { formatDuration, shortenPath } from "../shared/formatters.ts";
 import { loadConfig, resolveAsyncByDefault, resolveScheduledStoreRoot } from "./config.ts";
-import { buildSubagentToolDescription, buildSubagentToolPromptMetadata } from "./tool-description.ts";
+import { SUBAGENT_CONTROL_DESCRIPTION, SUBAGENT_DELEGATION_DESCRIPTION, SUBAGENT_WORKFLOW_DESCRIPTION, buildSubagentToolPromptMetadata } from "./tool-description.ts";
 import { formatWorkflowPreflightSummary, normalizeWorkflowPreflight } from "../workflows/workflow-preflight.ts";
 import { finalizeToolResult } from "./tool-result.ts";
 import { collectGoalContinuationNotices } from "../missions/goal-driver.ts";
@@ -93,6 +94,18 @@ import {
 } from "./control-notices.ts";
 
 export { loadConfig, resolveAsyncByDefault } from "./config.ts";
+
+// The three facade tool names making up the model-facing subagent surface. The
+// lifecycle hook (tool_result) and tool registration share this so a renamed or
+// added facade tool can never be silently excluded from UI/async restoration.
+export const SUBAGENT_DELEGATION_TOOL = "subagent" as const;
+export const SUBAGENT_WORKFLOW_TOOL = "subagent_workflow" as const;
+export const SUBAGENT_CONTROL_TOOL = "subagent_control" as const;
+const SUBAGENT_FACADE_TOOL_NAMES: ReadonlySet<string> = new Set([
+	SUBAGENT_DELEGATION_TOOL,
+	SUBAGENT_WORKFLOW_TOOL,
+	SUBAGENT_CONTROL_TOOL,
+]);
 
 const SLOW_RELOAD_PHASE_MS = 250;
 const RUNTIME_REGISTRY_STORE_KEY = "__piSubagentRuntimeRegistry";
@@ -704,40 +717,24 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	});
 
 
-	const parameters = createSubagentParamsSchema();
-	const tool: ToolDefinition<typeof parameters, Details> = {
-		name: "subagent",
+	const facadeExecute = createSubagentFacadeExecute(executeSubagentCollapsed);
+
+	const delegationTool: ToolDefinition<typeof SubagentDelegationParams, Details> = {
+		name: SUBAGENT_DELEGATION_TOOL,
 		label: "Subagent",
-		description: buildSubagentToolDescription(config),
+		description: SUBAGENT_DELEGATION_DESCRIPTION,
 		...buildSubagentToolPromptMetadata(config),
-		parameters,
+		parameters: SubagentDelegationParams,
 
 		async execute(id, params, signal, onUpdate, ctx) {
-			return finalizeToolResult(await executeSubagentCollapsed(id, params as SubagentParamsLike, signal ?? new AbortController().signal, onUpdate, ctx));
+			// SAFETY: SubagentDelegationParams feeds this tool, so params already
+			// conforms to the delegation facade shape; normalize flattens it.
+			return finalizeToolResult(await facadeExecute.delegation(id, params as SubagentDelegationFacadeParams, signal ?? new AbortController().signal, onUpdate, ctx));
 		},
 
 		renderCall(args, theme) {
 			const gap = " ".repeat(config.mainWindowRenderer?.horizontalSpacing ?? 1);
 			const title = theme.fg("toolTitle", theme.bold("subagent"));
-			if (args.action) {
-				const target = args.agent || "";
-				return new Text(
-					`${title}${gap}${args.action}${target ? `${gap}${theme.fg("accent", target)}` : ""}`,
-					0, 0,
-				);
-			}
-			if (args.workflowScript)
-				return new Text(
-					`${title}${gap}${formatWorkflowManifest(args.workflowScript, args.async, false, args.preflight)}`,
-					0,
-					0,
-				);
-			if (args.workflowScriptPath)
-				return new Text(
-					`${title}${gap}${theme.fg("accent", args.workflowScriptPath)}${args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : ""}${args.preflight !== undefined ? `${gap}${theme.fg("dim", formatWorkflowPreflightCall(args.preflight))}` : ""}`,
-					0,
-					0,
-				);
 			const asyncLabel = args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : "";
 			return new Text(
 				`${title}${gap}${theme.fg("accent", args.agent || "?")}${asyncLabel}`,
@@ -755,13 +752,85 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		},
 
 	};
+	pi.registerTool(delegationTool);
 
-	pi.registerTool(tool);
+	const workflowTool: ToolDefinition<typeof SubagentWorkflowParams, Details> = {
+		name: SUBAGENT_WORKFLOW_TOOL,
+		label: "Subagent Workflow",
+		description: SUBAGENT_WORKFLOW_DESCRIPTION,
+		parameters: SubagentWorkflowParams,
+
+		async execute(id, params, signal, onUpdate, ctx) {
+			// SAFETY: SubagentWorkflowParams feeds this tool, so params already
+			// conforms to the workflow facade shape; normalize flattens it.
+			return finalizeToolResult(await facadeExecute.workflow(id, params as SubagentWorkflowFacadeParams, signal ?? new AbortController().signal, onUpdate, ctx));
+		},
+
+		renderCall(args, theme) {
+			const gap = " ".repeat(config.mainWindowRenderer?.horizontalSpacing ?? 1);
+			const title = theme.fg("toolTitle", theme.bold("subagent_workflow"));
+			if (args.workflow) {
+				const asyncLabel = args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : "";
+				return new Text(`${title}${gap}${theme.fg("accent", args.workflow)}${asyncLabel}`, 0, 0);
+			}
+			const source = args.source;
+			if (source !== undefined && !isWorkflowSourceObject(source)) {
+				return new Text(`${title}${gap}${formatWorkflowManifest(source, args.async, false)}`, 0, 0);
+			}
+			const sourcePath = source?.path;
+			if (sourcePath !== undefined) {
+				const asyncLabel = args.async === true ? `${gap}${theme.fg("warning", "[async]")}` : "";
+				return new Text(`${title}${gap}${theme.fg("accent", sourcePath)}${asyncLabel}`, 0, 0);
+			}
+			return new Text(title, 0, 0);
+		},
+
+		renderResult(result, options, theme, context) {
+			clearLegacyResultAnimationTimer(context);
+			const renderedResult = { ...result, isError: context.isError };
+			return summaryInlineToolDisplay
+				? renderSubagentSummary(renderedResult, options, theme)
+				: renderSubagentResult(renderedResult, options, theme, undefined, config.mainWindowRenderer, config.foregroundDetachShortcut);
+		},
+
+	};
+	pi.registerTool(workflowTool);
+
+	const controlTool: ToolDefinition<typeof SubagentControlParams, Details> = {
+		name: SUBAGENT_CONTROL_TOOL,
+		label: "Subagent Control",
+		description: SUBAGENT_CONTROL_DESCRIPTION,
+		parameters: SubagentControlParams,
+
+		async execute(id, params, signal, onUpdate, ctx) {
+			// SAFETY: SubagentControlParams feeds this tool, so params already
+			// conforms to the control facade shape; normalize flattens it.
+			return finalizeToolResult(await facadeExecute.control(id, params as SubagentControlFacadeParams, signal ?? new AbortController().signal, onUpdate, ctx));
+		},
+
+		renderCall(args, theme) {
+			const gap = " ".repeat(config.mainWindowRenderer?.horizontalSpacing ?? 1);
+			const title = theme.fg("toolTitle", theme.bold("subagent_control"));
+			const action = args.action ?? "status";
+			const idLabel = args.id !== undefined ? `${gap}${theme.fg("accent", args.id)}` : "";
+			return new Text(`${title}${gap}${action}${idLabel}`, 0, 0);
+		},
+
+		renderResult(result, options, theme, context) {
+			clearLegacyResultAnimationTimer(context);
+			const renderedResult = { ...result, isError: context.isError };
+			return summaryInlineToolDisplay
+				? renderSubagentSummary(renderedResult, options, theme)
+				: renderSubagentResult(renderedResult, options, theme, undefined, config.mainWindowRenderer, config.foregroundDetachShortcut);
+		},
+
+	};
+	pi.registerTool(controlTool);
 
 	pi.on("before_agent_start", (event, ctx) => {
 		const selectedTools = event.systemPromptOptions?.selectedTools ?? (typeof pi.getActiveTools === "function" ? pi.getActiveTools() : []);
 		const sessionId = state.currentSessionId ?? resolveCurrentSessionId(ctx.sessionManager);
-		const advertisedPrompt = Array.isArray(selectedTools) && selectedTools.includes("subagent")
+		const advertisedPrompt = Array.isArray(selectedTools) && selectedTools.includes(SUBAGENT_DELEGATION_TOOL)
 			? buildAdvertisedAgentPrompt(advertisedAgents, resolveCurrentSubagentCapabilityCeiling(sessionId))
 			: undefined;
 		const systemPrompt = appendAdvertisedAgentPrompt(event.systemPrompt, advertisedPrompt);
@@ -834,7 +903,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	];
 
 	pi.on("tool_result", (event, ctx) => {
-		if (event.toolName !== "subagent") return;
+		if (!SUBAGENT_FACADE_TOOL_NAMES.has(event.toolName)) return;
 		if (!ctx.hasUI) return;
 		state.lastUiContext = ctx;
 		restoreActiveJobs(ctx);

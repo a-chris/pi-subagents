@@ -26,7 +26,7 @@ describe("subagent extension child mode", () => {
 			let registeredTool;
 			const fakePi = new Proxy({
 				events,
-				registerTool(tool) { if (tool.name === "subagent") registeredTool = tool; },
+				registerTool(tool) { if (tool.name === "subagent_control") registeredTool = tool; },
 				registerCommand() {},
 				registerShortcut() {},
 				registerMessageRenderer() {},
@@ -78,20 +78,20 @@ describe("subagent extension child mode", () => {
 			let registeredTool;
 			const fakePi = new Proxy({
 				events,
-				registerTool(tool) { if (tool.name === "subagent") registeredTool = tool; },
+				registerTool(tool) { if (tool.name === "subagent_workflow") registeredTool = tool; },
 				registerCommand() {}, registerShortcut() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName() {},
 			}, { get(target, prop) { return prop in target ? target[prop] : () => undefined; } });
 			registerSubagentExtension(fakePi);
 			if (!registeredTool) throw new Error("tool not registered");
 			const theme = { fg(_name, text) { return text; }, bold(text) { return text; } };
 			const workflow = registeredTool.renderCall({
-				workflowScript: "const scan = await runs.run('scan', {agent:'worker'}); return runs.all([{key:'correctness',agent:'reviewer'},{key:'tests',agent:'reviewer'}]);",
+				source: "const scan = await runs.run('scan', {agent:'worker'}); return runs.all([{key:'correctness',agent:'reviewer'},{key:'tests',agent:'reviewer'}]);",
 			}, theme).text;
-			const foregroundWorkflow = registeredTool.renderCall({ workflowScript: "return runs.run('publish', {agent:'worker'});", async: false }, theme).text;
-			const templateWorkflow = registeredTool.renderCall({ workflowScript: "return runs.run(\`template\`, {agent:'worker'});", async: false }, theme).text;
-			const commentedWorkflow = registeredTool.renderCall({ workflowScript: "// runs.run('ignored', {agent:'worker'})\nconst note = \"key: 'also-ignored'\"; return runs.run('real', {agent:'worker'});" }, theme).text;
-			const dynamicKeyWorkflow = registeredTool.renderCall({ workflowScript: "return runs.all([{key: 'review-' + item, agent: 'reviewer'}]);" }, theme).text;
-			const ordinaryKeyWorkflow = registeredTool.renderCall({ workflowScript: "const config = {key: 'secret'}; return runs.all([{agent: 'reviewer', config: {key: 'nested'}, key: 'review'}]);" }, theme).text;
+			const foregroundWorkflow = registeredTool.renderCall({ source: "return runs.run('publish', {agent:'worker'});", async: false }, theme).text;
+			const templateWorkflow = registeredTool.renderCall({ source: "return runs.run(\`template\`, {agent:'worker'});", async: false }, theme).text;
+			const commentedWorkflow = registeredTool.renderCall({ source: "// runs.run('ignored', {agent:'worker'})\nconst note = \"key: 'also-ignored'\"; return runs.run('real', {agent:'worker'});" }, theme).text;
+			const dynamicKeyWorkflow = registeredTool.renderCall({ source: "return runs.all([{key: 'review-' + item, agent: 'reviewer'}]);" }, theme).text;
+			const ordinaryKeyWorkflow = registeredTool.renderCall({ source: "const config = {key: 'secret'}; return runs.all([{agent: 'reviewer', config: {key: 'nested'}, key: 'review'}]);" }, theme).text;
 			if (!workflow.includes("background · 3 lanes: scan, correctness, tests")) throw new Error("expected workflow manifest, got " + workflow);
 			if (!foregroundWorkflow.includes("foreground · 1 lane: publish")) throw new Error("expected foreground workflow manifest, got " + foregroundWorkflow);
 			if (!templateWorkflow.includes("foreground · 1 lane: template")) throw new Error("expected static template lane, got " + templateWorkflow);
@@ -113,16 +113,16 @@ describe("subagent extension child mode", () => {
 				const events = { on() { return () => {}; }, emit() {} };
 				let registeredTool;
 				const fakePi = new Proxy({
-					events, registerTool(tool) { if (tool.name === "subagent") registeredTool = tool; },
+					events, registerTool(tool) { if (tool.name === "subagent_workflow") registeredTool = tool; },
 					registerCommand() {}, registerShortcut() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName() {},
 				}, { get(target, prop) { return prop in target ? target[prop] : () => undefined; } });
 				registerSubagentExtension(fakePi);
 				const theme = { fg(_name, text) { return text; }, bold(text) { return text; } };
 				const result = registeredTool.renderCall({
-					workflowScript: "return runs.run('scan' /* stable lane */, {agent:'worker'});",
+					source: "return runs.run('scan' /* stable lane */, {agent:'worker'});",
 				}, theme).text;
 				const explicitForeground = registeredTool.renderCall({
-					workflowScript: "return runs.run('publish', {agent:'worker'});",
+					source: "return runs.run('publish', {agent:'worker'});",
 					async: false,
 				}, theme).text;
 				if (!result.includes("background · 1 lane: scan")) throw new Error("expected workflow executor background manifest, got " + result);
@@ -188,13 +188,13 @@ describe("subagent extension child mode", () => {
 			let registeredTool;
 			const fakePi = new Proxy({
 				events,
-				registerTool(tool) { if (tool.name === "subagent") registeredTool = tool; },
+				registerTool(tool) { if (tool.name === "subagent_control") registeredTool = tool; },
 				registerCommand() {}, registerShortcut() {}, registerMessageRenderer() {}, sendMessage() {}, getSessionName() {},
 			}, { get(target, prop) { return prop in target ? target[prop] : () => undefined; } });
 			registerSubagentExtension(fakePi);
 			if (!registeredTool) throw new Error("tool not registered");
 			await assert.rejects(
-				registeredTool.execute("blank-action", { action: "", agent: "reviewer" }, new AbortController().signal, undefined, { cwd: process.cwd(), hasUI: false }),
+				registeredTool.execute("blank-action", { action: "" }, new AbortController().signal, undefined, { cwd: process.cwd(), hasUI: false }),
 				/action must be a non-empty/,
 			);
 		`;
@@ -525,6 +525,7 @@ describe("subagent extension child mode", () => {
 				],
 				{ cwd: projectRoot, env, encoding: "utf-8" },
 			);
+			// SAFETY: the child script writes exactly one JSON string to stdout.
 			assert.match(JSON.parse(output) as string, /disabled/i);
 		} finally {
 			fs.rmSync(agentDir, { recursive: true, force: true });
@@ -559,9 +560,13 @@ describe("subagent extension child mode", () => {
 				for (const handler of handlers.get("session_start")) await handler({}, ctx);
 				widgets.length = 0;
 				eventHandlers.get("subagent:async-started")({ id: "widget-run", pid: 1, sessionId: "session-widget", mode: "single", agent: "worker", asyncDir: "/tmp/widget-run" });
-				for (const handler of handlers.get("tool_result")) await handler({ toolName: "subagent" }, ctx);
+				// The lifecycle hook must treat every facade tool name the same: with the
+				// async widget disabled, each in-scope tool_result still clears it.
+				for (const toolName of ["subagent", "subagent_workflow", "subagent_control"]) {
+					for (const handler of handlers.get("tool_result")) await handler({ toolName }, ctx);
+				}
 				const asyncWidgets = widgets.filter((entry) => entry.key === "subagent-async");
-				if (asyncWidgets.length < 2 || asyncWidgets.some((entry) => entry.value !== undefined)) throw new Error("async widget rendered despite disabled config: " + JSON.stringify(asyncWidgets));
+				if (asyncWidgets.length < 3 || asyncWidgets.some((entry) => entry.value !== undefined)) throw new Error("async widget rendered despite disabled config: " + JSON.stringify(asyncWidgets));
 				for (const handler of handlers.get("session_shutdown")) await handler();
 			`;
 			const env = parentToolEnv();
@@ -600,9 +605,13 @@ describe("subagent extension child mode", () => {
 				for (const handler of handlers.get("session_start")) await handler({}, ctx);
 				widgets.length = 0;
 				eventHandlers.get("subagent:async-started")({ id: "widget-run", pid: 1, sessionId: "session-widget", mode: "workflow", agent: "worker", asyncDir: "/tmp/widget-run" });
-				for (const handler of handlers.get("tool_result")) await handler({ toolName: "subagent" }, ctx);
+				// The lifecycle tool_result hook must restore UI/async state for the workflow
+				// and control tools too, not just the delegation (subagent) tool.
+				for (const toolName of ["subagent_workflow", "subagent_control"]) {
+					for (const handler of handlers.get("tool_result")) await handler({ toolName }, ctx);
+				}
 				const asyncWidgets = widgets.filter((entry) => entry.key === "subagent-async");
-				if (!asyncWidgets.some((entry) => entry.value !== undefined)) throw new Error("async widget was not rendered with FleetView enabled: " + JSON.stringify(asyncWidgets));
+				if (!asyncWidgets.some((entry) => entry.value !== undefined)) throw new Error("async widget was not rendered with FleetView enabled for workflow/control: " + JSON.stringify(asyncWidgets));
 				for (const handler of handlers.get("session_shutdown")) await handler();
 			`;
 			const env = parentToolEnv();
