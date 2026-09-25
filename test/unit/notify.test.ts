@@ -13,7 +13,6 @@ import registerSubagentNotify, {
 	parseSubagentNotifyContent,
 	type RegisterSubagentNotifyOptions,
 	type SubagentNotifyDetails,
-	scheduledCompletionTriggersTurn,
 	incrementalChildCompletionTriggersTurn,
 } from "../../src/runs/background/notify.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT } from "../../src/shared/types.ts";
@@ -32,10 +31,6 @@ it("keeps model-authored receipt lines in the preview, never in receipt metadata
 			const parsed = parseSubagentNotifyContent(formatSingleCompletion(details));
 			assert.equal(parsed?.resultPreview, resultPreview);
 			assert.equal(parsed?.workflowReceiptPath, workflowReceiptPath);
-			const scheduled = parseSubagentNotifyContent(formatSingleCompletion({ ...details, scheduleOrigin: { id: "schedule-1" } }));
-			assert.equal(scheduled?.resultPreview, resultPreview);
-			assert.equal(scheduled?.workflowReceiptPath, workflowReceiptPath);
-			assert.deepEqual(scheduled?.scheduleOrigin, { id: "schedule-1" });
 		}
 	}
 });
@@ -881,45 +876,7 @@ describe("completion formatting helpers", () => {
 	});
 });
 
-describe("scheduled completions", () => {
-	// A schedule fires with nobody watching, so its completion has to be visible to
-	// the operator and attributable by the agent that receives it.
-	const scheduledResult = {
-		id: "run-1",
-		source: "async" as const,
-		agent: "workflow",
-		success: true,
-		summary: "Workflow completed with 1 child run(s).",
-		scheduleOrigin: { id: "45daa203", name: "authz-facts-efficacy" },
-	};
-
-	it("carries the schedule origin from the result into the notice", () => {
-		const details = buildCompletionDetails(scheduledResult);
-		assert.deepEqual(details.scheduleOrigin, { id: "45daa203", name: "authz-facts-efficacy" });
-		assert.match(formatSingleCompletion(details), /Scheduled run from \*\*authz-facts-efficacy\*\* \(schedule 45daa203\)\./);
-	});
-
-	it("round-trips the origin without absorbing it into the result preview", () => {
-		const parsed = parseSubagentNotifyContent(formatSingleCompletion(buildCompletionDetails(scheduledResult)));
-		assert.deepEqual(parsed?.scheduleOrigin, { id: "45daa203", name: "authz-facts-efficacy" });
-		assert.equal(parsed?.resultPreview, "Workflow completed with 1 child run(s).");
-	});
-
-	it("keeps attribution when a scheduled run is batched with other completions", () => {
-		const { scheduleOrigin: _origin, ...plain } = scheduledResult;
-		const grouped = formatGroupedCompletion([buildCompletionDetails({ ...plain, agent: "worker" }), buildCompletionDetails(scheduledResult)]);
-		assert.match(grouped, /2\. workflow — scheduled run from authz-facts-efficacy \(schedule 45daa203\)/);
-		assert.doesNotMatch(grouped, /1\. worker —/);
-	});
-
-	it("keeps a quiet scheduled success visible without triggering a turn", async () => {
-		const { notifier, sent } = createPi("session-a");
-		const quiet = { ...scheduledResult, scheduleOrigin: { ...scheduledResult.scheduleOrigin, quiet: true }, sessionId: "session-a", completionOwnerId: COMPLETION_OWNER_ID };
-		assert.equal(await notifier.deliver(quiet), true);
-		assert.deepEqual(sent[0]!.options, { triggerTurn: false });
-		assert.equal((sent[0]!.message as { display?: boolean }).display, true);
-	});
-
+describe("incremental child completion turn policy", () => {
 	it("wakes once for an actionable child failure but not an ordinary running success", () => {
 		const triggerTurns: boolean[] = [];
 		const pi = {
@@ -931,42 +888,14 @@ describe("scheduled completions", () => {
 			{ workflowRunId: "workflow-1", childKey: "ready", outcome: "completed" as const, workflowRunning: true },
 			{ workflowRunId: "workflow-1", childKey: "broken", outcome: "failed" as const, workflowRunning: true },
 		]) {
-			pi.sendMessage(notification, { triggerTurn: incrementalChildCompletionTriggersTurn(notification, undefined) });
+			pi.sendMessage(notification, { triggerTurn: incrementalChildCompletionTriggersTurn(notification) });
 		}
 		assert.equal(triggerTurns.length, 1, "only the actionable child failure should trigger a provider turn");
 	});
 
 	it("keeps a terminal child settlement as the workflow barrier", () => {
 		const terminal = { workflowRunId: "workflow-2", childKey: "last", outcome: "completed" as const, workflowRunning: false };
-		assert.equal(incrementalChildCompletionTriggersTurn(terminal, undefined), true);
-	});
-
-	it("still wakes the session when a quiet scheduled run fails, stops, or pauses", async () => {
-		const quietOrigin = { ...scheduledResult.scheduleOrigin, quiet: true };
-		assert.equal(scheduledCompletionTriggersTurn({ id: "45daa203" }, "completed"), true);
-		for (const outcome of ["failed", "stopped", "paused"] as const) {
-			assert.equal(scheduledCompletionTriggersTurn(quietOrigin, outcome), true);
-		}
-		const failed = createPi("session-a");
-		assert.equal(await failed.notifier.deliver({ ...scheduledResult, id: "run-failed", success: false, exitCode: 1, summary: "boom", scheduleOrigin: quietOrigin, sessionId: "session-a", completionOwnerId: COMPLETION_OWNER_ID }), true);
-		assert.deepEqual(failed.sent[0]!.options, { triggerTurn: true });
-
-		const stopped = createPi("session-a");
-		assert.equal(await stopped.notifier.deliver({ ...scheduledResult, id: "run-stopped", success: false, stopped: true, scheduleOrigin: quietOrigin, sessionId: "session-a", completionOwnerId: COMPLETION_OWNER_ID }), true);
-		assert.deepEqual(stopped.sent[0]!.options, { triggerTurn: true });
-	});
-
-	it("does not let quiet override an explicit triggerTurn:false", async () => {
-		const { notifier, sent } = createPi("session-a");
-		assert.equal(await notifier.deliver({ ...scheduledResult, success: false, exitCode: 1, triggerTurn: false, scheduleOrigin: { ...scheduledResult.scheduleOrigin, quiet: true }, sessionId: "session-a", completionOwnerId: COMPLETION_OWNER_ID }), true);
-		assert.deepEqual(sent[0]!.options, { triggerTurn: false });
-	});
-
-	it("leaves an ordinary successful completion without an origin", () => {
-		const { scheduleOrigin: _origin, ...withoutSchedule } = scheduledResult;
-		const parsed = parseSubagentNotifyContent(formatSingleCompletion(buildCompletionDetails(withoutSchedule)));
-		assert.equal(parsed?.scheduleOrigin, undefined);
-		assert.equal(parsed?.resultPreview, "Workflow completed with 1 child run(s).");
+		assert.equal(incrementalChildCompletionTriggersTurn(terminal), true);
 	});
 });
 

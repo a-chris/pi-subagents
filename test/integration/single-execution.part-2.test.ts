@@ -83,7 +83,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 }\n`, { mode: 0o755 });
 			const baseDir = createTempDir();
 			const bus = createEventBus();
-			const executor = makeExecutor([makeAgent("worker", { systemPrompt: "Intercom orchestration channel:" })], { worktreeBaseDir: baseDir, worktreeSetupHook: hook }, false, { sessionId: "session-123", count: 0 }, true, new Map(), undefined, undefined, bus);
+			const executor = makeExecutor([makeAgent("worker", { systemPrompt: "Intercom orchestration channel:" })], { worktreeBaseDir: baseDir, worktreeSetupHook: hook }, false, { sessionId: "session-123", count: 0 }, true, new Map(), undefined, bus);
 			let notified = false;
 			let notify!: () => void;
 			const notification = new Promise<void>((resolve) => { notify = resolve; });
@@ -789,7 +789,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		mockPi.onCall({ output: "nested completed" });
 		const descriptor = createRunFanoutBudget("root-run", 2);
 		try {
-			const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, {
+			const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), undefined, {
 				fanoutChild: true,
 				depth: 1,
 				waitTool: { enabled: true },
@@ -1154,7 +1154,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		mockPi.onCall({ output: "nested result" });
 		const route = createNestedRoute("root-nested-model");
 		try {
-			const executor = makeExecutor([makeAgent("echo", { model: "openai/gpt-5-mini", thinking: "high" })], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, {
+			const executor = makeExecutor([makeAgent("echo", { model: "openai/gpt-5-mini", thinking: "high" })], {}, false, undefined, true, new Map(), undefined, createEventBus(), undefined, {
 				fanoutChild: true,
 				depth: 1,
 				waitTool: { enabled: true },
@@ -1527,7 +1527,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		mockPi.onCall({ stdoutRaw: structuredEvents.map((entry) => JSON.stringify(entry)).join("\n") + "\n", structuredOutputCapture: { ok: true } });
 		mockPi.onCall({ output: "disabled first", writeFiles: [{ path: agentPath, content: definition("later") }] });
 		mockPi.onCall({ output: "disabled resumed" });
-		const executor = makeExecutor([], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), (cwd) => discoverAgents(cwd, "project").agents);
+		const executor = makeExecutor([], {}, false, undefined, true, new Map(), undefined, createEventBus(), (cwd) => discoverAgents(cwd, "project").agents);
 		const result = await executor.execute(
 			"workflow-inherited-resume-schema",
 			{
@@ -4764,7 +4764,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 }\n`, { mode: 0o755 });
 			const baseDir = createTempDir();
 			const bus = createEventBus();
-			const executor = makeExecutor([makeAgent("worker", { systemPrompt: "Intercom orchestration channel:" })], { worktreeBaseDir: baseDir, worktreeSetupHook: hook }, false, { sessionId: "session-123", count: 0 }, true, new Map(), undefined, undefined, bus);
+			const executor = makeExecutor([makeAgent("worker", { systemPrompt: "Intercom orchestration channel:" })], { worktreeBaseDir: baseDir, worktreeSetupHook: hook }, false, { sessionId: "session-123", count: 0 }, true, new Map(), undefined, bus);
 			let notified = false;
 			let notify!: () => void;
 			const notification = new Promise<void>((resolve) => { notify = resolve; });
@@ -5510,7 +5510,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		mockPi.onCall({ output: "nested completed" });
 		const descriptor = createRunFanoutBudget("root-run", 2);
 		try {
-			const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, {
+			const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), undefined, {
 				fanoutChild: true,
 				depth: 1,
 				waitTool: { enabled: true },
@@ -5875,7 +5875,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		mockPi.onCall({ output: "nested result" });
 		const route = createNestedRoute("root-nested-model");
 		try {
-			const executor = makeExecutor([makeAgent("echo", { model: "openai/gpt-5-mini", thinking: "high" })], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, {
+			const executor = makeExecutor([makeAgent("echo", { model: "openai/gpt-5-mini", thinking: "high" })], {}, false, undefined, true, new Map(), undefined, createEventBus(), undefined, {
 				fanoutChild: true,
 				depth: 1,
 				waitTool: { enabled: true },
@@ -6248,7 +6248,7 @@ if (!fs.existsSync(${JSON.stringify(holdPath)})) { console.log('{}'); } else {
 		mockPi.onCall({ stdoutRaw: structuredEvents.map((entry) => JSON.stringify(entry)).join("\n") + "\n", structuredOutputCapture: { ok: true } });
 		mockPi.onCall({ output: "disabled first", writeFiles: [{ path: agentPath, content: definition("later") }] });
 		mockPi.onCall({ output: "disabled resumed" });
-		const executor = makeExecutor([], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), (cwd) => discoverAgents(cwd, "project").agents);
+		const executor = makeExecutor([], {}, false, undefined, true, new Map(), undefined, createEventBus(), (cwd) => discoverAgents(cwd, "project").agents);
 		const result = await executor.execute(
 			"workflow-inherited-resume-schema",
 			{

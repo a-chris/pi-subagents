@@ -16,7 +16,7 @@ import {
 	createCompletionBatcher,
 	resolveCompletionBatchConfig,
 } from "./completion-batcher.ts";
-import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ChildWatchdogProgress, type ChildWatchdogWarningSummary, type ParallelHandoffReference, type ScheduleOrigin, type SubagentState } from "../../shared/types.ts";
+import { SUBAGENT_ASYNC_COMPLETE_EVENT, SUBAGENT_FOREGROUND_COMPLETE_EVENT, type ChildWatchdogProgress, type ChildWatchdogWarningSummary, type ParallelHandoffReference, type SubagentState } from "../../shared/types.ts";
 import { safeTerminalText } from "../../shared/display-text.ts";
 import { isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 import type { ResultDeliveryOwnership } from "./result-delivery-ownership.ts";
@@ -54,8 +54,6 @@ export interface SubagentNotifyDetails {
 	sessionLabel?: string;
 	sessionValue?: string;
 	handoffPath?: string;
-	/** Present when a durable schedule launched the run. */
-	scheduleOrigin?: ScheduleOrigin;
 	watchdogBlockers?: SubagentNotifyWatchdogBlocker[];
 }
 
@@ -124,7 +122,6 @@ export interface CompletionNotification {
 	completionOwnerId?: string | null;
 	triggerTurn?: boolean;
 	parallelHandoff?: ParallelHandoffReference;
-	scheduleOrigin?: ScheduleOrigin;
 	asyncDir?: string;
 }
 
@@ -325,15 +322,10 @@ export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 	const correlationLines = formatCorrelationLines(details);
 	const watchdogLines = formatWatchdogBlockerLines(details);
 	const taskKind = details.source === "foreground" ? "Detached foreground task" : "Background task";
-	const scheduleLine = details.scheduleOrigin
-		? `Scheduled run from **${details.scheduleOrigin.name ?? details.scheduleOrigin.id}** (schedule ${details.scheduleOrigin.id}).`
-		: undefined;
 	return [
 		`${taskKind} ${details.status}: **${details.agent}**${details.taskInfo ?? ""}`,
 		details.workflowReceiptPath ? `Workflow receipt: ${details.workflowReceiptPath}` : undefined,
 		"",
-		scheduleLine,
-		scheduleLine ? "" : undefined,
 		formatResultPreview(details),
 		...(watchdogLines.length ? ["", ...watchdogLines] : []),
 		details.handoffPath ? "" : undefined,
@@ -347,22 +339,11 @@ export function formatSingleCompletion(details: SubagentNotifyDetails): string {
 		.join("\n");
 }
 
-export function scheduledCompletionTriggersTurn(origin: ScheduleOrigin | undefined, outcome: string): boolean {
-	return !(origin?.quiet === true && outcome === "completed");
-}
-
-/**
- * Child settlement is useful context, but an ordinary successful child does not
- * establish the workflow's dependency barrier while its workflow is running.
- * Keep actionable outcomes waking the parent, and preserve a terminal child as
- * the barrier for hosts that do not emit a separate workflow completion wake.
- */
 export function incrementalChildCompletionTriggersTurn(
 	child: Pick<IncrementalChildCompletion, "outcome" | "workflowRunning">,
-	origin: ScheduleOrigin | undefined,
 ): boolean {
 	if (child.workflowRunning && child.outcome === "completed") return false;
-	return scheduledCompletionTriggersTurn(origin, child.outcome);
+	return true;
 }
 
 export function formatIncrementalChildCompletion(child: IncrementalChildCompletion): string {
@@ -390,16 +371,6 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 	const receiptHeader = lines[1]?.startsWith("Workflow receipt: ") && lines[2] === "";
 	const workflowReceiptPath = receiptHeader ? lines[1]!.slice("Workflow receipt: ".length) : undefined;
 	let body = lines.slice(receiptHeader ? 3 : 2);
-	// Restore the schedule origin so a re-rendered notice keeps its attribution and
-	// does not fold the line into the result preview.
-	const scheduleMatch = (body[0] ?? "").match(/^Scheduled run from \*\*(.+?)\*\* \(schedule (.+?)\)\.$/);
-	let parsedScheduleOrigin: ScheduleOrigin | undefined;
-	if (scheduleMatch) {
-		const label = scheduleMatch[1]!;
-		const id = scheduleMatch[2]!;
-		parsedScheduleOrigin = { id, ...(label === id ? {} : { name: label }) };
-		body = body.slice(body[1]?.trim() === "" ? 2 : 1);
-	}
 	let sessionIndex = -1;
 	for (let i = body.length - 1; i >= 1; i--) {
 		if (body[i - 1]?.trim() === "" && /^(Session|Session file|Session share error):\s+/.test(body[i]!)) {
@@ -444,7 +415,6 @@ export function parseSubagentNotifyContent(content: string): SubagentNotifyDetai
 		status: match[2] as SubagentNotifyDetails["status"],
 		...(match[1] === "Detached foreground task" ? { source: "foreground" as const } : {}),
 		...(match[4] ? { taskInfo: match[4] } : {}),
-		...(parsedScheduleOrigin ? { scheduleOrigin: parsedScheduleOrigin } : {}),
 		...(workflowReceiptPath ? { workflowReceiptPath } : {}),
 		resultPreview,
 		...(handoffPath ? { handoffPath } : {}),
@@ -463,7 +433,7 @@ export function formatGroupedCompletion(details: SubagentNotifyDetails[]): strin
 		const detail = details[index];
 		if (!detail) continue;
 		const sessionLine = formatSessionLine(detail);
-		blocks.push(`${index + 1}. ${detail.agent}${detail.taskInfo ?? ""}${detail.scheduleOrigin ? ` — scheduled run from ${detail.scheduleOrigin.name ?? detail.scheduleOrigin.id} (schedule ${detail.scheduleOrigin.id})` : ""}`);
+		blocks.push(`${index + 1}. ${detail.agent}${detail.taskInfo ?? ""}`);
 		if (detail.workflowReceiptPath) blocks.push(`Workflow receipt: ${detail.workflowReceiptPath}`);
 		blocks.push(formatResultPreview(detail));
 		blocks.push(...formatWatchdogBlockerLines(detail));
@@ -512,7 +482,7 @@ function sendCompletion(pi: Pick<ExtensionAPI, "sendMessage">, items: PendingCom
 	if (items.length === 0) return true;
 	const details = items.map((item) => item.details);
 	const content = details.length === 1 ? formatSingleCompletion(details[0]!) : formatGroupedCompletion(details);
-	const display = details.some((detail) => detail.source === "foreground" || detail.status !== "completed" || detail.scheduleOrigin !== undefined);
+	const display = details.some((detail) => detail.source === "foreground" || detail.status !== "completed");
 	try {
 		pi.sendMessage(
 			{
@@ -643,14 +613,9 @@ export function buildCompletionDetails(result: CompletionNotification): Subagent
 				: result.sessionFile
 					? { label: "Session file", value: result.sessionFile }
 					: undefined;
-	const rawOrigin = result.scheduleOrigin;
-	const scheduleOrigin = rawOrigin && typeof rawOrigin.id === "string"
-		? { id: rawOrigin.id, ...(typeof rawOrigin.name === "string" ? { name: rawOrigin.name } : {}) }
-		: undefined;
 	return {
 		agent,
 		status,
-		...(scheduleOrigin ? { scheduleOrigin } : {}),
 		...(workflowReceiptPath ? { workflowReceiptPath } : {}),
 		...(asyncDir ? { asyncDir } : {}),
 		...(result.source ? { source: result.source } : {}),
@@ -756,7 +721,7 @@ export default function registerSubagentNotify(
 			details,
 			sessionId: result.sessionId,
 			completionOwnerId: result.completionOwnerId,
-			triggerTurn: result.triggerTurn !== false && scheduledCompletionTriggersTurn(result.scheduleOrigin, details.status),
+			triggerTurn: result.triggerTurn !== false,
 			resolve,
 		};
 		if (notificationDebug.enabled) item.trace = traceIdentity(result);

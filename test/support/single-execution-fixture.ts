@@ -340,7 +340,6 @@ export function installSingleExecutionHooks() {
 		allowMutatingManagementActions = true,
 		initialAsyncJobs: SubagentState["asyncJobs"] = new Map(),
 		workflowControllers?: Map<string, AbortController>,
-		handleScheduledRunAction?: Parameters<typeof createSubagentExecutor>[0]["handleScheduledRunAction"],
 		piEvents = createEventBus(),
 		discoverAgentsForCwd?: (cwd: string) => typeof agents,
 		childRuntime?: ChildRuntimeConfig,
@@ -365,7 +364,6 @@ export function installSingleExecutionHooks() {
 			expandTilde: (value: string) => value,
 			discoverAgents: (cwd: string) => ({ agents: discoverAgentsForCwd ? discoverAgentsForCwd(cwd) : agents }),
 			allowMutatingManagementActions,
-			...(handleScheduledRunAction ? { handleScheduledRunAction } : {}),
 		});
 	}
 

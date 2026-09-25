@@ -47,7 +47,7 @@ Use direct `{ agent, task }` for one bounded child. Use `workflowScript` when th
 
 For multi-step or parallel work, make exactly one top-level `subagent` workflow call with `async:true` and launch children only inside it. Read this guide for recipes rather than constructing a second top-level orchestration. Available sandbox helpers include `runs.run`, `runs.all`, `runs.steer`, `runs.status`, `runs.ref`/`runs.refs`, `emit`, `console`, standard JavaScript, and mission `state` when enabled. No filesystem, shell, arbitrary Pi tools, or host globals are available; named resources alone may grant `runs.host` authority.
 
-Workflow-level child controls default onto each `runs.run`/`runs.all` launch; explicit child fields override them. See [retained children](tool-reference.md#retained-children) for follow-up challenges, [output binding](tool-reference.md#output-mode-details) for durable artifacts, and [schedules](missions.md#schedules) for delayed/recurring scripts.
+Workflow-level child controls default onto each `runs.run`/`runs.all` launch; explicit child fields override them. See [retained children](tool-reference.md#retained-children) for follow-up challenges and [output binding](tool-reference.md#output-mode-details) for durable artifacts.
 
 Child results cross into the script as plain JSON data. Non-JSON host metadata is omitted, so use returned fields such as `runId`, `ok`, `output`, and `structuredOutput` for workflow control.
 
@@ -67,7 +67,7 @@ subagent({ workflowScriptPath: "workflows/review.js", cwd: "/path/to/project" })
 subagent({ action: "validate", workflowScriptPath: "workflows/review.js" });
 ```
 
-The fields are mutually exclusive. Relative paths resolve against the request `cwd`; absolute paths pass through. The host reads the file before validation, schedule creation, or workflow sandbox execution. The sandbox still has no filesystem access. Missing, unreadable, and empty files return file input errors instead of script syntax errors.
+The fields are mutually exclusive. Relative paths resolve against the request `cwd`; absolute paths pass through. The host reads the file before validation or workflow sandbox execution. The sandbox still has no filesystem access. Missing, unreadable, and empty files return file input errors instead of script syntax errors.
 
 Inline and file-backed scripts accept bounded plain-JSON `args`:
 
@@ -77,7 +77,7 @@ subagent({ workflowScriptPath: "workflows/review.js", args: { target: "src/workf
 return runs.run("review", { agent: "reviewer", task: `Review ${args.target}` });
 ```
 
-Omitted arguments are an empty object. The `args` object, its nested objects, and its arrays are frozen in the sandbox. Arguments are data only: they do not grant `runs.host` or other authority. Normalized arguments are persisted with workflow and schedule evidence for replay and diagnosis, so do not put secrets in them. Routine status text does not render argument values.
+Omitted arguments are an empty object. The `args` object, its nested objects, and its arrays are frozen in the sandbox. Arguments are data only: they do not grant `runs.host` or other authority. Normalized arguments are persisted with workflow evidence for replay and diagnosis, so do not put secrets in them. Routine status text does not render argument values.
 
 ### Named workflow resources for permission extensions
 
@@ -349,7 +349,7 @@ A top-level `{ workflowScript, worktree: true }` makes isolation the default for
 
 Before a materialized `runs.run` or `runs.all` group dispatches fresh children, isolated sources must be Git repositories with clean working trees (excluding `.pi/subagents/` runtime state). A rejected group dispatches no children and spends no fan-out slots or child output claims; key-level failure traces can remain. Checks are shared only within that group, are cancellable, and run again at allocation because sources can change. Retained resumes keep their stored contracts. Select the correct cwd or arrange an operator-approved commit/stash; isolation is never dropped automatically.
 
-Use `baseRef` to branch managed worktrees from `HEAD` or a supported named ref such as `refs/heads/release`, `refs/tags/v1`, or `origin/main`. Full 40/64-character commit IDs and revision expressions such as `HEAD~1` are unsupported. For example, `{ workflowScript, worktree: true, baseRef: "refs/heads/release" }` applies the release ref to children unless a child supplies its own `baseRef`. If omitted, the default `HEAD` is resolved at worktree allocation, not when the script is validated or a schedule is created. The source checkout must still be clean, and the ref must resolve to a commit before any worktree is allocated.
+Use `baseRef` to branch managed worktrees from `HEAD` or a supported named ref such as `refs/heads/release`, `refs/tags/v1`, or `origin/main`. Full 40/64-character commit IDs and revision expressions such as `HEAD~1` are unsupported. For example, `{ workflowScript, worktree: true, baseRef: "refs/heads/release" }` applies the release ref to children unless a child supplies its own `baseRef`. If omitted, the default `HEAD` is resolved at worktree allocation, not when the script is validated. The source checkout must still be clean, and the ref must resolve to a commit before any worktree is allocated.
 
 Configure the worktree provider, native path layout, base directory, and setup hook in [configuration.md](configuration.md).
 

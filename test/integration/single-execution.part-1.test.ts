@@ -92,7 +92,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 				options: options as { triggerTurn?: boolean } | undefined,
 			});
 		};
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), undefined, undefined, sendMessage);
+		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), undefined, undefined, sendMessage);
 		const launch = await executor.execute("workflow-child-wakes", {
 			async: true,
 			workflowScript: `return await runs.all([{ key: "a", agent: "echo", task: "Child A" }, { key: "b", agent: "echo", task: "Child B" }]);`,
@@ -575,31 +575,10 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		assert.equal(mockPi.callCount(), 1);
 	});
 
-	it("allows schedule.create to load its workflowScript target from a path", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		let forwarded;
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, async (params) => {
-			forwarded = params;
-			return { content: [{ type: "text", text: "created" }], details: { mode: "management", results: [] } };
-		});
-		fs.writeFileSync(path.join(tempDir, "scheduled.js"), "return runs.run('main', { agent: 'echo' })");
-
-		const result = await executor.executePublic(
-			"schedule-create",
-			{ action: "schedule.create", id: "nightly", every: "1h", workflowScriptPath: "scheduled.js", args: { task: "nightly review" } },
-			new AbortController().signal,
-			undefined,
-			makeMinimalCtx(tempDir),
-		);
-
-		assert.equal(result.isError, undefined);
-		assert.equal(result.content[0]?.text, "created");
-		assert.equal(forwarded?.workflowScript, "return runs.run('main', { agent: 'echo' })");
-		assert.deepEqual(forwarded?.args, { task: "nightly review" });
-	});
 
 	it("rejects a static spawn-budget mismatch before discovering or launching children", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		const before = fs.readdirSync(tempDir).sort();
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), () => {
+		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), () => {
 			throw new Error("spawn-budget validation must not discover or launch agents");
 		});
 		const script = [
@@ -631,7 +610,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 
 	it("validates workflow scripts without launching children or creating artifacts", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		const before = fs.readdirSync(tempDir).sort();
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), () => {
+		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), () => {
 			throw new Error("validate must not discover or launch agents");
 		});
 
@@ -849,26 +828,6 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		assert.equal(mockPi.callCount(), 0);
 	});
 
-	it("denies host calls when scheduled raw workflows replay", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
-		const markerPath = path.join(tempDir, "scheduled-host-marker.txt");
-		const script = `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "ran");`;
-		const result = await makeExecutor([makeAgent("echo")]).executeScheduled(
-			"scheduled-raw-host-denied",
-			{
-				workflowScript: `return await runs.host("ci", { kind: "command", command: ${JSON.stringify(`${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}`)}, timeoutMs: 1000 });`,
-				async: false,
-				scheduleOrigin: { id: "nightly" },
-			},
-			new AbortController().signal,
-			makeMinimalCtx(tempDir),
-		);
-		assert.equal(result.isError, true);
-		assert.match(result.content[0]?.text ?? "", /runs\.host is unavailable/);
-		assert.equal(fs.existsSync(markerPath), false);
-		assert.equal(result.details.workflow?.resource, undefined);
-		assert.equal(mockPi.callCount(), 0);
-	});
-
 	it("admits only the host command granted by a named workflow resource", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		const result = await makeExecutor([makeAgent("echo")]).executePublic(
 			"named-ci-resource",
@@ -1074,7 +1033,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		const requestCwd = path.join(tempDir, "request-cwd");
 		fs.mkdirSync(requestCwd);
 		fs.writeFileSync(path.join(requestCwd, "workflow.js"), `return runs.run("bad key", { agent: "echo" });`);
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), () => {
+		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), () => {
 			throw new Error("validate must not discover or launch agents");
 		});
 
@@ -1096,7 +1055,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 
 	it("reports missing and empty workflowScriptPath files before validation", { skip: !createSubagentExecutor ? "executor not importable" : undefined }, async () => {
 		fs.writeFileSync(path.join(tempDir, "empty.js"), " \n");
-		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), () => {
+		const executor = makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, createEventBus(), () => {
 			throw new Error("file input errors must not discover or launch agents");
 		});
 
@@ -1800,7 +1759,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 				notifyOn: ["needs_attention"],
 				notifyChannels: ["event"],
 			},
-		}, false, undefined, true, asyncJobs, undefined, undefined, piEvents);
+		}, false, undefined, true, asyncJobs, undefined, piEvents);
 
 		const result = await executor.execute(
 			"workflow-child-attention-notice",
@@ -1939,7 +1898,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		const controller = new AbortController();
 		controller.abort();
 		try {
-			const result = await makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, undefined, piEvents).execute(
+			const result = await makeExecutor([makeAgent("echo")], {}, false, undefined, true, new Map(), undefined, piEvents).execute(
 				"abort-workflow-await",
 				{ agent: "echo", task: "Do not import the seeded result", async: true, workflowAwaitAsync: true, workflowChildAsyncId: runId },
 				controller.signal,
@@ -2798,7 +2757,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		fs.mkdirSync(appDir, { recursive: true });
 		const rootAgents = [makeAgent("echo", { output: "root-report.md" })];
 		const appAgents = [makeAgent("echo", { output: "app-report.md" })];
-		const executor = makeExecutor(rootAgents, {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), (cwd) => path.resolve(cwd) === path.resolve(appDir) ? appAgents : rootAgents);
+		const executor = makeExecutor(rootAgents, {}, false, undefined, true, new Map(), undefined, createEventBus(), (cwd) => path.resolve(cwd) === path.resolve(appDir) ? appAgents : rootAgents);
 
 		const result = await executor.execute(
 			"scripted-workflow-child-cwd-omitted-output-default",
@@ -2825,7 +2784,7 @@ describe("single sync execution", { skip: !available ? "pi packages not availabl
 		fs.mkdirSync(appDir, { recursive: true });
 		const rootAgents = [makeAgent("echo", { output: "root-report.md" })];
 		const appAgents = [makeAgent("echo", { output: "app-report.md" })];
-		const executor = makeExecutor(rootAgents, {}, false, undefined, true, new Map(), undefined, undefined, createEventBus(), (cwd) => path.resolve(cwd) === path.resolve(appDir) ? appAgents : rootAgents);
+		const executor = makeExecutor(rootAgents, {}, false, undefined, true, new Map(), undefined, createEventBus(), (cwd) => path.resolve(cwd) === path.resolve(appDir) ? appAgents : rootAgents);
 
 		const result = await executor.execute(
 			"scripted-workflow-child-cwd-output-default",

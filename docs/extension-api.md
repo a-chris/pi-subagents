@@ -25,7 +25,7 @@ Register in `session_start` using **`ctx.sessionManager.getSessionId()`**, not t
 
 `resolve` must do synchronous, bounded validation and string construction, without I/O, SDK calls, timers or process work. Core deep-copies plain JSON args: at most 16 KiB encoded, nesting depth 8, 16 fields per object, 64 items per array, finite numbers, and nonempty strings of at most 16 KiB. The extension must additionally reject unsupported fields and validate resource-specific semantics. Throws, promises/thenables and malformed expansions fail before authority is issued; errors are bounded to 4096 characters.
 
-Host grants bind **exact key/trimmed-command pairs**, not independent sets of keys and commands. At most 32 grants are accepted, with unique safe workflow keys and nonempty commands bounded to 16 KiB without NUL. Omitted grants give no host authority. Core snapshots the expansion and grants at resolution. Disposing stops future lookup, but already-admitted workflows retain captured grants, even after replacement. Use existing stop/deadline controls for cancellation; this does not promise survival of host shutdown or durable named scheduling. Existing child admission and capability ceilings still apply.
+Host grants bind **exact key/trimmed-command pairs**, not independent sets of keys and commands. At most 32 grants are accepted, with unique safe workflow keys and nonempty commands bounded to 16 KiB without NUL. Omitted grants give no host authority. Core snapshots the expansion and grants at resolution. Disposing stops future lookup, but already-admitted workflows retain captured grants, even after replacement. Use existing stop/deadline controls for cancellation; this does not promise survival of host shutdown. Existing child admission and capability ceilings still apply.
 
 ### Mixed child and finite host example
 
@@ -118,7 +118,7 @@ The RPC methods are `ping`, `status`, `manage`, `spawn`, `steer`, `interrupt`, `
 
 Method notes:
 
-- `manage` exposes a narrow schedule-only allowlist: `schedule.list`, `schedule.show`, `schedule.history`, `schedule.pause`, `schedule.resume`, `schedule.run`, and `schedule.delete`. All actions except `schedule.list` require `id`. Mission, agent, config, worktree, and arbitrary management actions are rejected before executor dispatch. `ping.capabilities.managementActions` advertises the exact allowlist.
+- `manage` is reserved for future narrow management actions; today it rejects all actions as unsupported until one is added. Mission, agent, config, worktree, and arbitrary management actions are rejected before executor dispatch. `ping.capabilities.managementActions` advertises the empty allowlist.
 - `spawn` accepts structured single-child execution (`agent`, `task?`), inline `workflowScript`, or `workflowScriptPath` and is async-only: omit `async` or set `async: true`, omit `clarify`, and do not pass management `action` values. Relative script paths resolve against the request `cwd`. It goes through the same executor as the `subagent` tool, so agent discovery, validation, session attribution, configured spawn caps, child-safety depth, artifacts, and async status all behave the same.
 - `steer` requires an async run `id` (plus optional child `index`) and a non-empty `message`; its reply preserves the normal acknowledged-delivery result. Optional `mode` values are `steer` (default), `follow_up`, and `auto`, and receipts include `deliveryStatus: "delivered" | "queued"`. RPC steering disables the direct tool's pause-and-revive recovery in every mode so an extension keeps authority over the exact child it spawned; `ping.capabilities.nonRecoveringSteer` advertises this guarantee.
 - `resume` requires a run target and non-empty `message`. It delegates to the existing revival path, which validates current-session ownership, persisted session/recovery metadata, stopped/live state, capability ceilings, and the exclusive session lease before returning the new async run details. Callers may request a `file-only` output path for the revived result without overriding its model, tools, or budgets. `ping.capabilities.resume` advertises this seam.
@@ -128,7 +128,7 @@ Method notes:
 Capability advertisements on `ping`:
 
 - `events.asyncComplete` — exact process-local completion correlation after RPC `spawn`.
-- `managementActions` — exact schedule management actions accepted by RPC `manage`.
+- `managementActions` — the exact management actions accepted by RPC `manage`.
 - `launchResolvedExtensions` — the optional launch-resolved extension projection in status details.
 - `runtimeAcknowledgedExtensions` — the optional child-runtime acknowledgement projection and event name.
 - `processTerminalProof` — the process-terminal proof status (see [observability.md](observability.md#process-terminal-proof)).
@@ -379,7 +379,7 @@ Semantics:
 
 `denyExtensions` suppresses ambient, configured, and MCP provider extensions while retaining the package runtime needed for child protocol enforcement. This is a same-process policy boundary, not a sandbox against malicious code already running in the parent process.
 
-Schedules created while a ceiling is active are rejected until durable schedule persistence is available; unrestricted schedules remain subject to any policy active when they fire. Public status exposes bounded audit counts and sources, never full extension paths.
+Public status exposes bounded audit counts and sources, never full extension paths.
 
 ## Background-work provider API
 

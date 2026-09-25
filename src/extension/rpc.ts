@@ -62,15 +62,7 @@ export type SubagentRpcReplyEnvelope<T = unknown> = {
 	};
 };
 
-export const SUBAGENT_RPC_MANAGEMENT_ACTIONS = [
-	"schedule.list",
-	"schedule.show",
-	"schedule.history",
-	"schedule.pause",
-	"schedule.resume",
-	"schedule.run",
-	"schedule.delete",
-] as const;
+export const SUBAGENT_RPC_MANAGEMENT_ACTIONS = [] as const;
 
 type SubagentRpcManagementAction = typeof SUBAGENT_RPC_MANAGEMENT_ACTIONS[number];
 
@@ -495,17 +487,12 @@ function manageParams(params: unknown): SubagentParamsLike {
 		throw new SubagentRpcError("invalid_params", "RPC manage id must be a non-empty string.");
 	}
 	const action = input.action as SubagentRpcManagementAction;
-	const requiresId = action !== "schedule.list";
-	if (requiresId && typeof input.id !== "string") {
+	if (typeof input.id !== "string") {
 		throw new SubagentRpcError("invalid_params", `RPC manage ${action} requires id.`);
-	}
-	if (action === "schedule.run" && input.quiet !== undefined && typeof input.quiet !== "boolean") {
-		throw new SubagentRpcError("invalid_params", "RPC manage quiet must be a boolean.");
 	}
 	const output: SubagentParamsLike = {
 		action,
 		...(typeof input.id === "string" ? { id: input.id.trim() } : {}),
-		...(action === "schedule.run" && input.quiet === true ? { quiet: true } : {}),
 	};
 	assertSubagentParams(output, "RPC manage params");
 	return output;

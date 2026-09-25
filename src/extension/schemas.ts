@@ -263,7 +263,6 @@ const SubagentParamProperties = {
 		description: "Management/control only; omit for execution. validate accepts either script input. Discover actions with guide topic tool-reference."
 	})),
 	capabilities: Type.Optional(Type.Boolean({ description: "list: compact capability rows/details without system prompts." })),
-	name: Type.Optional(Type.String({ description: "schedule.create name." })),
 	id: Type.Optional(Type.String({
 		description: "Run id/prefix for status/control."
 	})),
@@ -291,14 +290,6 @@ const SubagentParamProperties = {
 	target: Type.Optional(Type.String({ enum: ["main", "children", "child"], description: "Watchdog target." })),
 	focus: Type.Optional(Type.Boolean({ description: "Focus inspector.open/project.open pane." })),
 	thinking: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "boolean" }], description: "watchdog.configure only: off/minimal/low/medium/high/xhigh/max, inherit, false=off; true invalid. Dispatch ignores this; use model suffix." })),
-	at: Type.Optional(Type.String({ description: "schedule.create: delay (+10m) or zoned ISO timestamp." })),
-	every: Type.Optional(Type.String({ description: "schedule.create interval, e.g. 30m/6h/2d/2w." })),
-	sessionOnly: Type.Optional(Type.Boolean()),
-	quiet: Type.Optional(Type.Boolean()),
-	on: Type.Optional(Type.Unsafe({ anyOf: [{ type: "string" }, { type: "integer" }], description: "Reserved calendar selector." })),
-	timezone: Type.Optional(Type.String()),
-	overlap: Type.Optional(Type.String({ enum: ["skip"] })),
-	catchUp: Type.Optional(Type.String({ enum: ["none", "latest"], description: "Missed schedule occurrences; default latest." })),
 	missionId: Type.Optional(Type.String()),
 	mission: Type.Optional(Type.Unsafe({ ...MissionLaunchOverride, description: "false disables; true invalid. Object: exactly one non-empty title or summary; objective/labels optional; goal only true, requires budget.tokens." })),
 	missionUpdate: Type.Optional(Type.Unsafe({ ...MissionUpdateOverride, description: "Mission patch; read guide missions." })),

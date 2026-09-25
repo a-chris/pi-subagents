@@ -2,7 +2,7 @@
 
 Parameters and actions for the `subagent` tool. These are what the LLM passes when it calls the tool; most users ask naturally or use slash commands instead.
 
-Call `{ action: "guide", topic: "tool-reference" }` for this reference or `topic: "workflows"` for [workflow recipes](workflows.md). Use `topic: "agents"` for authoring, `topic: "missions"` for missions/schedules, and `topic: "watchdog"` for watchdog controls. Guide reads do not change the schema or grant authority.
+Call `{ action: "guide", topic: "tool-reference" }` for this reference or `topic: "workflows"` for [workflow recipes](workflows.md). Use `topic: "agents"` for authoring, `topic: "missions"` for missions, and `topic: "watchdog"` for watchdog controls. Guide reads do not change the schema or grant authority.
 
 ## Execution examples
 
@@ -10,9 +10,9 @@ Chaining is code-driven through `workflowScript`. Use `await runs.run(...)` for 
 
 Use `{ action: "validate", workflowScript }` to check statically decidable syntax and structure without launching children. It returns `{ ok, errors }` and fails the tool call when `ok` is false. Literal child `baseRef` values are checked against the runtime ref policy. Dynamic keys and values remain subject to runtime checks; static validation does not guess them.
 
-Use `workflowScriptPath` instead of `workflowScript` to load the same JavaScript statement body from a file. The two fields are mutually exclusive. Relative paths resolve against the request `cwd`, and absolute paths pass through. The host reads the file before validation, scheduling, or sandbox execution. The workflow sandbox still has no filesystem access. Missing, unreadable, and empty files fail as file input errors.
+Use `workflowScriptPath` instead of `workflowScript` to load the same JavaScript statement body from a file. The two fields are mutually exclusive. Relative paths resolve against the request `cwd`, and absolute paths pass through. The host reads the file before validation or sandbox execution. The workflow sandbox still has no filesystem access. Missing, unreadable, and empty files fail as file input errors.
 
-Raw inline and file-backed scripts accept bounded plain-JSON `args`, including during `validate` and `schedule.create`. Omitted raw args become `{}`; supplied args are deeply frozen in the sandbox. Normalized args persist in run and schedule evidence for diagnosis and exact replay, so never include secrets. Args are data only and do not grant `runs.host` authority.
+Raw inline and file-backed scripts accept bounded plain-JSON `args`, including during `validate`. Omitted raw args become `{}`; supplied args are deeply frozen in the sandbox. Normalized args persist in run evidence for diagnosis and exact replay, so never include secrets. Args are data only and do not grant `runs.host` authority.
 
 For permission-extension interoperability, use one of the package-owned named resources with bounded `args` instead of caller-supplied workflow text:
 
@@ -26,7 +26,6 @@ The host resolves the script and authority internally and records bounded proven
 ```js
 { workflowScriptPath: "workflows/review.js", args: { target: "src/workflows" }, cwd: "/path/to/project" }
 { action: "validate", workflowScriptPath: "workflows/review.js", args: { target: "src/workflows" } }
-{ action: "schedule.create", every: "6h", workflowScriptPath: "workflows/review.js", args: { target: "src/workflows" } }
 ```
 
 ```js
@@ -55,7 +54,7 @@ The host resolves the script and authority internally and records bounded proven
 |-------|------|---------|-------------|
 | `agent` | string | - | One direct child or agent-management target. Workflow child agents are set inside `runs.run` or `runs.all`. |
 | `task` | string | agent default | Direct child's task; requires `agent`, excludes `action` and workflow inputs. `agent` may also select a management target. |
-| `action` | string | - | Offline workflow `validate`, agent management (including `guide`, `children.list`, and `refine`/`refine.show`/`refine.rollback`), mission (`mission.create/list/show/update/resolve-decision/attach-run/close`), Inspect actions (`inspector.command/open/status/close`), status/control, plan-only `worktree.cleanup`, schedule, watchdog, or doctor action. |
+| `action` | string | - | Offline workflow `validate`, agent management (including `guide`, `children.list`, and `refine`/`refine.show`/`refine.rollback`), mission (`mission.create/list/show/update/resolve-decision/attach-run/close`), Inspect actions (`inspector.command/open/status/close`), status/control, plan-only `worktree.cleanup`, watchdog, or doctor action. |
 | `topic` | `overview \| workflows \| agents \| missions \| observability \| tool-reference \| configuration \| models \| watchdog \| extension-api` | `overview` | Packaged guide topic for `action: "guide"`. |
 | `config` | object/string | - | Agent config for management create/update. |
 | `context` | `fresh \| fork \| summary` | per-agent `defaultContext`, else `fresh` | Explicit `fresh`, `fork`, or `summary` overrides every workflow child. When omitted, each agent's declared `defaultContext` resolves per child, else `fresh`; implicit fork/summary fall back to fresh without a persisted parent session and leaf. Explicit fork is strict. `summary` distills the parent session into a role-directed brief (see [`contextBrief`](agents.md)) prepended to the child task; generation failures fall back to fresh. Packaged `worker` and `reviewer` default to `summary`; `oracle` defaults to `fork`; the rest default to `fresh`. |
@@ -224,10 +223,6 @@ Rules:
 
 `refine`, `refine.show`, and `refine.rollback` manage project-local refinement overlays for one agent. `/subagents-refine <agent>` is the slash equivalent of `refine`. See [agents.md](agents.md#refinement-overlays) for behavior and storage.
 
-### Schedule controls
-
-Use `schedule.create` with `workflowScript` or `workflowScriptPath`, not a direct child. `at` accepts a delay like `+10m` or an ISO timestamp with timezone; `every` accepts fixed intervals. `sessionOnly:true` binds restoration/execution to the creating session file; omitted/false is project-wide. Recurring `quiet:true` keeps successful automatic fires visible without a parent turn; failed, stopped or paused runs still wake the parent. One-shot `at` and manual `schedule.run` stay noisy unless that launch passes `quiet:true`. See [missions and schedules](missions.md#schedules) for examples and list/show/history/pause/resume/run/run-due/delete. Calendar selectors (`on`, `timezone`) and schedule mission attachment are deferred. `baseRef` resolves only at worktree allocation and still requires a clean source checkout.
-
 ## Status and control actions
 
 ### Execution-mode boundaries after failures
@@ -284,7 +279,6 @@ subagent({ action: "doctor" })
 - `/subagents-stop` without an id opens a selector with confirmation when a TUI is available. Use `↑`/`↓` or `j`/`k` to move through the selector.
 - In non-TUI contexts the slash command prints exact `subagent({ action: "stop", id })` and `/subagents-stop <id>` commands.
 - Pass a child id to stop one child of a multi-child async run or workflow while the rest continue: `/subagents-stop <run-id> <child-id>` (equivalent to `subagent({ action: "stop", id, childId })`). Child ids come from status output, the async status snapshot, or `/subagents-inspect-rpc` replies. Only pending or running children are stoppable; the request is rejected for anything else instead of widening to a run-level stop.
-- Inactive schedules can appear in the selector, but they are labeled as schedules and route through `schedule.pause`, not `stop`.
 
 ### steer
 

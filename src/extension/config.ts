@@ -61,21 +61,6 @@ function isValidKeyId(value: string): boolean {
 		&& parts.every((modifier) => KEY_MODIFIERS.has(modifier));
 }
 
-export function resolveScheduledStoreRoot(value: string): string {
-	const expanded = value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
-	if (!path.isAbsolute(expanded)) throw new Error(`config.scheduledRuns.storeRoot must be an absolute path or "~/...", got ${JSON.stringify(value)}`);
-	return path.normalize(expanded);
-}
-
-function validateScheduledRunsConfig(value: unknown): void {
-	if (value === undefined) return;
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("config.scheduledRuns must be a JSON object");
-	const storeRoot = (value as Record<string, unknown>).storeRoot;
-	if (storeRoot === undefined) return;
-	if (typeof storeRoot !== "string" || !storeRoot.trim()) throw new Error("config.scheduledRuns.storeRoot must be a non-empty string");
-	resolveScheduledStoreRoot(storeRoot);
-}
-
 function validateFleetKeybindingsConfig(value: unknown): void {
 	if (value === undefined) return;
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("config.fleetKeybindings must be a JSON object");
@@ -181,7 +166,6 @@ function validateConfig(config: Record<string, unknown>): void {
 	validateMissionStoreConfig(config.missions);
 	validateAuthorityPolicy(config.authorityPolicy);
 	validatePermissionConfig(config.permissions);
-	validateScheduledRunsConfig(config.scheduledRuns);
 	validateFleetKeybindingsConfig(config.fleetKeybindings);
 	validateArtifactConfig(config.artifactConfig);
 	validateCapacityConfig(config.capacity);

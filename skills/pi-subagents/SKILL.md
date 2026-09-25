@@ -74,12 +74,12 @@ that runner explicitly supports the option.
 
 ## Read the reference for the branch
 
-For exact API fields and worked examples, call `subagent({action:"guide",topic:"tool-reference"})` or `topic:"workflows"`. The compact tool definition is not the recipe catalog; use `topic:"missions"` for mission updates and schedules.
+For exact API fields and worked examples, call `subagent({action:"guide",topic:"tool-reference"})` or `topic:"workflows"`. The compact tool definition is not the recipe catalog; use `topic:"missions"` for mission updates.
 
 | Branch | Read |
 | --- | --- |
 | Delegate or choose roles, prompts, models, or slash commands | `references/prompting-and-roles.md` |
-| Execute single, scripted, async, scheduled, mission, forked, watchdog, oracle, or blocked-reporting workflows | `references/execution-controls.md` |
+| Execute single, scripted, async, mission, forked, watchdog, oracle, or blocked-reporting workflows | `references/execution-controls.md` |
 | Review, validate, triage gate failures, or prepare delivery | `references/review-and-validation.md` |
 | List, create, edit, disable, eject, or expose agents/RPC | `references/management-authoring-rpc.md` |
 | Check safety constraints, recipes, or error handling | `references/constraints-and-recipes.md` |

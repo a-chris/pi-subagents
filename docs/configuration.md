@@ -355,22 +355,6 @@ This limit bounds current top-level async load. It is separate from cumulative `
 
 `subagent({ action: "status" })`, fleet status, and `subagent({ action: "doctor" })` expose used, effective limit, and remaining active capacity. Static chains and parallel calls fail before creating run artifacts or starting partial work when their declared capacity cannot fit. Later retries or unbounded dynamic work are not guaranteed by that preflight.
 
-## `scheduledRuns`
-
-```json
-{ "scheduledRuns": { "enabled": false, "maxPending": 20 } }
-```
-
-Durable schedules are enabled by default and stored per project under `.pi/subagents/schedules/<id>/`. See [missions.md](missions.md#schedules) for usage.
-
-Set `storeRoot` to keep durable schedules outside project repositories. It must be an absolute path or a `~/` path, which expands from the user home directory. Each project is stored under a hash of its resolved working directory, so projects do not share schedules.
-
-```json
-{ "scheduledRuns": { "storeRoot": "~/.local/share/pi-subagents/schedules" } }
-```
-
-When `storeRoot` is omitted, schedules remain at `<cwd>/.pi/subagents/schedules`.
-
 ## `parallel`
 
 ```json
@@ -502,7 +486,6 @@ Automatic missions are enabled by default for ordinary launches with a task. Use
     "discardWorktree": "confirm",
     "destructiveCleanup": "confirm",
     "spawnBudgetGrant": "confirm",
-    "scheduleCreate": "auto",
     "stopRun": "auto",
     "steerRun": "auto",
     "inspectorOpen": "auto",

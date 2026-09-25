@@ -1,9 +1,8 @@
 # Plan: Facade rewrite of the subagent tool surface
 
-> Status: **M3.1 Lanes DONE (merged `d8f67b7d` + synthesis `aaa11a84`) — next: M3.2.** VISION updated; decisions resolved.
-> Current milestone: **M3.2 — Schedules** (`schedule.*` actions + `at`/`every`/`timezone`/
-> `catchUp`/`overlap`/`on`/`name`, `src/runs/background/scheduled-runs.ts` engine; grep
-> `schedule.*` gone; related tests deleted). Then 3.3 watchdog, 3.4 missions-trim.
+> Status: **M3.2 Schedules DONE (committed `ff8d0166`) — next: M3.3.** VISION updated; decisions resolved.
+> Current milestone: **M3.3 — Watchdog** (`watchdog.*` actions, `scope`/`target`/`focus`/`thinking`,
+> `src/watchdog/runtime.ts` + watchdog config validators + `docs/watchdog.md`). Then 3.4 missions-trim.
 > M1 result: three facade tools on main; rendered facade schemas 1,995 B total (was 12,449);
 > suite 2,931/2,944 at head, sole failure = pre-existing `watchdog-lsp-diagnostics` parallel-load
 > flake (passes isolated on both heads). Reviewer accepted the fixes for its two blockers.
@@ -23,6 +22,14 @@
 > (usageBudget guidance leftovers) fixed in synthesis commit `aaa11a84`.
 > Residuals: pi-lens style advisories on pre-existing baseline code (parallel-handoff
 > `validateManifestIdentity` L52-63 etc.) recorded, not fixed (option-a decision, M2 precedent).
+> M3.2 result: schedule subsystem removed entirely — `scheduled-runs.ts` engine deleted, all nine
+> `schedule.*` actions + `at`/`every`/`timezone`/`catchUp`/`overlap`/`on`/`name`/`sessionOnly`/
+> `quiet` off the surface, `ScheduleOrigin`/`ScheduledRunsConfig`/mission `"scheduled"` mode gone,
+> RPC `manage` allowlist emptied (`managementActions` = `[]`), slash stop selector async-only,
+> docs/skills edited, one CHANGELOG line. Typecheck green; unit 2,850/2,863 (sole fail = the known
+> watchdog-lsp parallel-load flake, pass isolated); integration 767/769 (sole pre-existing part-2
+> parse break). Residuals: `scheduling`-wording/`schedule evidence` doc lines the scout missed fixed
+> in-tree (tool-reference.md L13/L15, extension-api.md L28, prompting-and-roles.md L7).
 > Read "Vision & mindset" below first — it is the guideline set for anyone working on
 > this plan, in any session, and it is the tie-breaker for implementation issues.
 
@@ -299,9 +306,9 @@ is a safe checkpoint on its own.
 
 ## Resume checklist (next session)
 
-1. Start **M3.2 — Schedules**: `schedule.*` actions, `at`/`every`/`timezone`/`catchUp`/
-   `overlap`/`on`/`name`, `src/runs/background/scheduled-runs.ts` engine; delete related tests;
-   add one CHANGELOG line. Then 3.3 watchdog, 3.4 missions-trim. Each is an independent, narrow
+1. Start **M3.3 — Watchdog**: `watchdog.*` actions, `scope`/`target`/`focus`/`thinking`,
+   `src/watchdog/runtime.ts` + watchdog config validators + `docs/watchdog.md`; delete related tests;
+   add one CHANGELOG line. Then 3.4 missions-trim. Each is an independent, narrow
    PR; keep one writer per worktree; reviewer each before merge. Follow the session protocol.
 2. Reuse the M3.1 orchestration lesson: scout map must include the subsystem's OWN test files
    (the lanes scout missed scripted-workflow.test.ts); reviewer verdicts are evidence to verify

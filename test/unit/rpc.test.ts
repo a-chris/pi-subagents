@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
-import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { consumeStopRequestPayload, stopRequestPath, stopRequestsDir } from "../../src/runs/background/control-channel.ts";
 import {
 	SUBAGENT_RPC_PROTOCOL_VERSION,
@@ -13,7 +12,7 @@ import {
 	subagentRpcReplyEvent,
 	type SubagentRpcReplyEnvelope,
 } from "../../src/extension/rpc.ts";
-import { SUBAGENT_CHILD_STATUS_EVENT, type Details, type SubagentChildStatusEvent, type SubagentState } from "../../src/shared/types.ts";
+import { SUBAGENT_CHILD_STATUS_EVENT, type SubagentChildStatusEvent, type SubagentState } from "../../src/shared/types.ts";
 
 class FakeEvents {
 	readonly emitted: Array<{ event: string; data: unknown }> = [];
@@ -103,7 +102,7 @@ describe("subagent extension RPC bridge", () => {
 		);
 		assert.deepEqual(
 			(reply as { data: { capabilities?: { managementActions?: unknown } } }).data.capabilities?.managementActions,
-			["schedule.list", "schedule.show", "schedule.history", "schedule.pause", "schedule.resume", "schedule.run", "schedule.delete"],
+			[],
 		);
 		assert.deepEqual(
 			(reply as { data: { capabilities?: { fleetStatus?: unknown } } }).data.capabilities?.fleetStatus,
@@ -261,94 +260,6 @@ describe("subagent extension RPC bridge", () => {
 		assert.equal(executed.length, 1);
 
 		bridge.dispose();
-	});
-
-	it("delegates allowlisted schedule management through the active session", async () => {
-		const events = new FakeEvents();
-		const executed: unknown[] = [];
-		const bridge = registerSubagentRpcBridge({
-			events,
-			getContext: () => ctx(),
-			execute: async (_id, params) => {
-				executed.push(params);
-				return { content: [{ type: "text", text: "ok" }], details: { mode: "management", results: [] } } satisfies AgentToolResult<Details>;
-			},
-		});
-
-		assert.equal((await request(events, "manage-list", "manage", { action: "schedule.list" })).success, true);
-		assert.equal((await request(events, "manage-pause", "manage", { action: "schedule.pause", id: "nightly" })).success, true);
-		assert.deepEqual(executed, [
-			{ action: "schedule.list" },
-			{ action: "schedule.pause", id: "nightly" },
-		]);
-
-		const denied = await request(events, "manage-denied", "manage", { action: "mission.close", id: "mission-1" });
-		assert.equal(denied.success, false);
-		assert.equal((denied as { error: { code: string } }).error.code, "invalid_params");
-		const missingId = await request(events, "manage-missing", "manage", { action: "schedule.run" });
-		assert.equal(missingId.success, false);
-		assert.equal((missingId as { error: { code: string } }).error.code, "invalid_params");
-
-		bridge.dispose();
-	});
-
-	it("forwards RPC schedule.run quiet:true to launch and keeps omitted quiet noisy", async () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-rpc-schedule-quiet-"));
-		const project = path.join(root, "project");
-		fs.mkdirSync(project);
-		const scheduleCtx = {
-			cwd: project,
-			sessionManager: {
-				getSessionId: () => "session-a",
-				getSessionFile: () => path.join(project, "session-a.jsonl"),
-			},
-		} as const;
-		type Launch = {
-			params: Record<string, unknown>;
-			resolve(result: { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> }): void;
-		};
-		const launches: Launch[] = [];
-		const { createScheduledRunManager } = await import("../../src/runs/background/scheduled-runs.ts");
-		const manager = createScheduledRunManager({
-			config: { scheduledRuns: { enabled: true } },
-			storeRoot: path.join(root, "stores"),
-			now: () => Date.parse("2030-01-01T00:00:00Z"),
-			launch: (params) => new Promise((resolve) => launches.push({ params: params as Record<string, unknown>, resolve: resolve as Launch["resolve"] })) as never,
-		});
-		manager.bindSession(scheduleCtx as never);
-		const created = await manager.handleToolCall({
-			action: "schedule.create",
-			id: "quiet-hourly",
-			every: "1h",
-			quiet: true,
-			workflowScript: "return runs.run('main', { agent: 'worker', task: 'Maintain backlog' })",
-		}, scheduleCtx as never);
-		assert.equal(created.isError, undefined);
-
-		const events = new FakeEvents();
-		const bridge = registerSubagentRpcBridge({
-			events,
-			getContext: () => scheduleCtx as never,
-			execute: async (_id, params, _signal, _hook, execCtx) => manager.handleToolCall(params, execCtx),
-		});
-		try {
-			const noisy = request(events, "run-noisy", "manage", { action: "schedule.run", id: "quiet-hourly" });
-			for (let i = 0; i < 8; i++) await Promise.resolve();
-			assert.equal("quiet" in (launches[0]?.params.scheduleOrigin as Record<string, unknown>), false);
-			launches[0]!.resolve({ content: [{ type: "text", text: "Async" }], details: { mode: "single", results: [], asyncId: "rpc-loud" } });
-			assert.equal((await noisy).success, true);
-			manager.handleAsyncCompletion({ runId: "rpc-loud", success: true, summary: "Done" });
-
-			const quiet = request(events, "run-quiet", "manage", { action: "schedule.run", id: "quiet-hourly", quiet: true });
-			for (let i = 0; i < 8; i++) await Promise.resolve();
-			assert.deepEqual(launches[1]?.params.scheduleOrigin, { id: "quiet-hourly", name: "workflowScript -> agent worker", quiet: true });
-			launches[1]!.resolve({ content: [{ type: "text", text: "Async" }], details: { mode: "single", results: [], asyncId: "rpc-quiet" } });
-			assert.equal((await quiet).success, true);
-		} finally {
-			bridge.dispose();
-			manager.stop();
-			fs.rmSync(root, { recursive: true, force: true });
-		}
 	});
 
 	it("projects bounded display-safe active fleet records without internal ids", async () => {

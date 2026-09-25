@@ -242,7 +242,6 @@ export function reconcileDetachedWorkflowChildCompletion(input: {
 			cwd: next.cwd,
 			sessionId: next.sessionId ?? (typeof existing?.sessionId === "string" ? existing.sessionId : undefined),
 			completionOwnerId: next.completionOwnerId,
-			...(next.scheduleOrigin ? { scheduleOrigin: next.scheduleOrigin } : {}),
 		},
 		receipt,
 		receiptPath,
@@ -294,7 +293,6 @@ export function reconcileDetachedWorkflowChildCompletion(input: {
 			results,
 			sessionId: plan.status.sessionId,
 			completionOwnerId: plan.status.completionOwnerId,
-			...(plan.status.scheduleOrigin ? { scheduleOrigin: plan.status.scheduleOrigin } : {}),
 			timestamp: Date.now(),
 			triggerTurn: true,
 		});

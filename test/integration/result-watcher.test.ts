@@ -12,7 +12,6 @@ import registerSubagentNotify from "../../src/runs/background/notify.ts";
 import { createResultDeliveryOwnership } from "../../src/runs/background/result-delivery-ownership.ts";
 import { writeAsyncResultFile, writePendingAsyncResultFile } from "../../src/runs/background/result-files.ts";
 import { encodeIndexSegment, MAX_INDEX_SEGMENT_BYTES } from "../../src/runs/background/index-segment.ts";
-import { createScheduledRunManager, scheduledRunStorePath } from "../../src/runs/background/scheduled-runs.ts";
 import { prepareMissionLaunch, writeMissionAsyncBinding } from "../../src/missions/lifecycle.ts";
 import { readMission, updateMission } from "../../src/missions/store.ts";
 import { SUBAGENT_ASYNC_COMPLETE_EVENT, type SubagentState } from "../../src/shared/types.ts";
@@ -240,7 +239,7 @@ describe("result watcher", () => {
 		}
 	});
 
-	it("includes scheduled observer ids while priming current-session results", async () => {
+	it("includes observer-known run ids while priming current-session results", async () => {
 		const resultsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-result-watcher-current-prime-"));
 		try {
 			const state = createState();
@@ -251,7 +250,7 @@ describe("result watcher", () => {
 				deliverIntercomResults: false,
 				observedCompletionRunIds() {
 					observedRunIdLookups += 1;
-					return ["scheduled-a"];
+					return ["observer-a"];
 				},
 			});
 			watcher.primeExistingResults();
@@ -685,65 +684,6 @@ describe("result watcher", () => {
 		}
 	});
 
-	it("observes retained-project completions without changing active-session delivery", async () => {
-		const root = fs.mkdtempSync(path.join(os.tmpdir(), "pi-result-watcher-scheduled-"));
-		const resultsDir = path.join(root, "results");
-		const project = path.join(root, "project-a");
-		fs.mkdirSync(resultsDir);
-		fs.mkdirSync(project);
-		const ctx = {
-			cwd: project,
-			sessionManager: {
-				getSessionId: () => "session-a",
-				getSessionFile: () => path.join(project, "session-a.jsonl"),
-			},
-		} as unknown as ExtensionContext;
-		const manager = createScheduledRunManager({
-			config: { scheduledRuns: { enabled: true } },
-			storeRoot: path.join(root, "stores"),
-			launch: async () => ({ content: [{ type: "text", text: "Async" }], details: { mode: "single", results: [], asyncId: "scheduled-a" } }),
-		});
-		try {
-			manager.bindSession(ctx);
-			await manager.handleToolCall({ action: "schedule.create", id: "retained", every: "1h", workflowScript: "return runs.run('main', { agent: 'worker' })" }, ctx);
-			await manager.handleToolCall({ action: "schedule.run", id: "retained" }, ctx);
-			const scheduleDir = path.join(scheduledRunStorePath(project, undefined, path.join(root, "stores")), "retained");
-			assert.equal(fs.existsSync(path.join(scheduleDir, "active.lock")), true);
-
-			const emitted: Array<{ event: string; data: unknown }> = [];
-			const state = createState();
-			state.currentSessionId = "session-b";
-			const resultPath = path.join(resultsDir, "scheduled-a.json");
-			writeIndexedResult(resultPath, { id: "scheduled-a", sessionId: "session-a", success: true, summary: "done" });
-			const watcher = createResultWatcher({
-				events: {
-					on: () => () => {},
-					emit(event: string, data: unknown) { emitted.push({ event, data }); },
-				},
-			}, state, resultsDir, 60_000, {
-				observeCompletion: (result) => manager.handleAsyncCompletion(result),
-				observedCompletionRunIds: () => manager.observedCompletionRunIds(),
-				notifier: { deliver: async () => assert.fail("inactive-session completion must not reach the live notifier") },
-			});
-			try {
-				watcher.startResultWatcher();
-				watcher.primeExistingResults();
-				await new Promise((resolve) => setTimeout(resolve, 10));
-			} finally {
-				watcher.stopResultWatcher();
-			}
-
-			assert.equal(state.currentSessionId, "session-b");
-			assert.equal(emitted.length, 0);
-			assert.equal(fs.existsSync(path.join(scheduleDir, "active.lock")), false);
-			assert.match(fs.readFileSync(path.join(scheduleDir, "history.json"), "utf-8"), /"state": "completed"/);
-			assert.equal(fs.existsSync(resultPath), true, "the owning session keeps delivery ownership of its result file");
-		} finally {
-			manager.stop();
-			fs.rmSync(root, { recursive: true, force: true });
-		}
-	});
-
 	it("delivers indexed pending results during reload when public promotion is blocked", async () => {
 		const resultsDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-result-watcher-pending-index-"));
 		const originalError = console.error;
@@ -825,13 +765,13 @@ describe("result watcher", () => {
 		try {
 			const resultsDir = path.join(root, "results");
 			writeIndexedResult(path.join(resultsDir, "current.json"), { id: "current", runId: "current", sessionId: "session-current", success: true, summary: "current" });
-			writeIndexedResult(path.join(resultsDir, "scheduled-a.json"), { id: "scheduled-a", runId: "scheduled-a", sessionId: "session-a", success: true, summary: "scheduled" });
+			writeIndexedResult(path.join(resultsDir, "observer-a.json"), { id: "observer-a", runId: "observer-a", sessionId: "session-a", success: true, summary: "observed" });
 			let observations = 0;
 			const state = createState();
 			state.currentSessionId = "session-current";
 			const watcher = createResultWatcher({ events: { on: () => () => {}, emit() {} } }, state, resultsDir, 60_000, {
-				observedCompletionRunIds: () => ["scheduled-a"],
-				observeCompletion: (result) => { if (result.runId === "scheduled-a") observations += 1; },
+				observedCompletionRunIds: () => ["observer-a"],
+				observeCompletion: (result) => { if (result.runId === "observer-a") observations += 1; },
 				notifier: { deliver: async () => true },
 			});
 			try {
@@ -854,24 +794,24 @@ describe("result watcher", () => {
 			for (let i = 0; i < 300; i += 1) {
 				fs.writeFileSync(path.join(resultsDir, `stale-${i}.json`), JSON.stringify({ id: `stale-${i}`, sessionId: "session-stale", success: true, summary: "done" }), "utf-8");
 			}
-			const resultPath = path.join(resultsDir, "scheduled-pending.json");
+			const resultPath = path.join(resultsDir, "observer-pending.json");
 			fs.mkdirSync(resultPath, { recursive: true });
 			writePendingAsyncResultFile(resultPath, {
-				id: "scheduled-pending",
-				runId: "scheduled-pending",
+				id: "observer-pending",
+				runId: "observer-pending",
 				sessionId: "session-a",
 				completionOwnerId: COMPLETION_OWNER_ID,
 				success: true,
 				state: "complete",
-				summary: "scheduled pending done",
+				summary: "observed pending done",
 			});
 			let observations = 0;
 			const state = createState();
 			state.currentSessionId = "session-b";
 			const watcher = createResultWatcher({ events: { on: () => () => {}, emit() {} } }, state, resultsDir, 60_000, {
-				observedCompletionRunIds: () => ["scheduled-pending"],
+				observedCompletionRunIds: () => ["observer-pending"],
 				observeCompletion: (result) => {
-					if (result.runId === "scheduled-pending") observations += 1;
+					if (result.runId === "observer-pending") observations += 1;
 				},
 				notifier: { deliver: async () => assert.fail("observer-owned completion must not reach active delivery") },
 			});
@@ -882,7 +822,7 @@ describe("result watcher", () => {
 				watcher.stopResultWatcher();
 			}
 
-			assert.equal(fs.existsSync(pendingResultPath(resultsDir, "session-a", "scheduled-pending")), true);
+			assert.equal(fs.existsSync(pendingResultPath(resultsDir, "session-a", "observer-pending")), true);
 			assert.equal(fs.statSync(resultPath).isDirectory(), true);
 			assert.equal(fs.existsSync(path.join(resultsDir, "stale-0.json")), true);
 		} finally {
@@ -897,15 +837,15 @@ describe("result watcher", () => {
 			for (let i = 0; i < 300; i += 1) {
 				fs.writeFileSync(path.join(resultsDir, `stale-${i}.json`), JSON.stringify({ id: `stale-${i}`, sessionId: "session-stale", success: true, summary: "done" }), "utf-8");
 			}
-			const resultPath = path.join(resultsDir, "scheduled-a.json");
-			writeIndexedResult(resultPath, { id: "scheduled-a", runId: "scheduled-a", sessionId: "session-a", success: true, summary: "done" });
+			const resultPath = path.join(resultsDir, "observer-a.json");
+			writeIndexedResult(resultPath, { id: "observer-a", runId: "observer-a", sessionId: "session-a", success: true, summary: "done" });
 			let observations = 0;
 			let observed = true;
 			const makeWatcher = () => {
 				const state = createState();
 				state.currentSessionId = "session-b";
 				return createResultWatcher({ events: { on: () => () => {}, emit() {} } }, state, resultsDir, 60_000, {
-					observedCompletionRunIds: () => observed ? ["scheduled-a"] : [],
+					observedCompletionRunIds: () => observed ? ["observer-a"] : [],
 					observeCompletion: () => { observations += 1; observed = false; },
 					notifier: { deliver: async () => assert.fail("observer-owned completion must not reach active delivery") },
 				});

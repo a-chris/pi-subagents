@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { normalizePublicSubagentExecution } from "../../src/extension/public-execution.ts";
 
 describe("public subagent execution normalization", () => {
-	it("accepts structured single-child, workflow, management, and schedules", () => {
+	it("accepts structured single-child, workflow, and management shapes", () => {
 		assert.deepEqual(normalizePublicSubagentExecution({ workflowScript: "return 1", globalConcurrencyLimit: 4, maxSubagentSpawnsPerRun: 8 }), { ok: true, params: { workflowScript: "return 1", globalConcurrencyLimit: 4, maxSubagentSpawnsPerRun: 8 } });
 		assert.deepEqual(normalizePublicSubagentExecution({ workflowScript: "return args.task", args: { task: "review" } }), { ok: true, params: { workflowScript: "return args.task", args: { task: "review" } } });
 		assert.deepEqual(normalizePublicSubagentExecution({ workflow: "review", args: { task: "Review this" } }), { ok: true, params: { workflow: "review", args: { task: "Review this" } } });
@@ -65,14 +65,6 @@ describe("public subagent execution normalization", () => {
 		assert.deepEqual(
 			normalizePublicSubagentExecution({ action: " validate ", workflowScript: "return 1", maxSubagentSpawnsPerRun: 5 }),
 			{ ok: true, params: { action: "validate", workflowScript: "return 1", maxSubagentSpawnsPerRun: 5 } },
-		);
-		assert.deepEqual(
-			normalizePublicSubagentExecution({ action: " schedule.create ", every: "1h", workflowScript: "return args.task", args: { task: "review" } }),
-			{ ok: true, params: { action: "schedule.create", every: "1h", workflowScript: "return args.task", args: { task: "review" } } },
-		);
-		assert.deepEqual(
-			normalizePublicSubagentExecution({ action: " schedule.create ", every: "1h", workflowScriptPath: "/tmp/workflow.js" }),
-			{ ok: true, params: { action: "schedule.create", every: "1h", workflowScriptPath: "/tmp/workflow.js" } },
 		);
 	});
 
@@ -201,7 +193,6 @@ describe("public subagent execution normalization", () => {
 			{ workflowScript: " " },
 			{ workflowScriptPath: " " },
 			{ action: "status", workflowScript: "return 1" },
-			{ action: "schedule.create", every: "1h", agent: "worker", workflowScript: "return 1" },
 			{ workflowScript: "return 1", isolation: "invalid" },
 			{ workflowScript: "return 1", isolation: "none", worktree: true },
 			{ workflowScript: "return 1", isolation: "worktree", worktree: false },

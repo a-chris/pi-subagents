@@ -20,7 +20,6 @@ export interface PublicSubagentExecutionParams {
 	args?: unknown;
 	workflowScript?: unknown;
 	workflowScriptPath?: unknown;
-	sessionOnly?: unknown;
 	globalConcurrencyLimit?: unknown;
 	maxSubagentSpawnsPerRun?: unknown;
 	preflight?: unknown;
@@ -129,8 +128,8 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 		return { ok: false, error: "action must be a non-empty management/control action, or omit action and use workflowScript.", mode: "management" };
 	}
 	const normalizedAction = typeof action === "string" ? action.trim() : undefined;
-	if (params.baseRef !== undefined && normalizedAction !== undefined && normalizedAction !== "resume" && normalizedAction !== "schedule.create") {
-		return { ok: false, error: "baseRef is only supported for child execution, resume, and schedule.create.", mode: "management" };
+	if (params.baseRef !== undefined && normalizedAction !== undefined && normalizedAction !== "resume") {
+		return { ok: false, error: "baseRef is only supported for child execution and resume.", mode: "management" };
 	}
 	if (normalizedAction !== undefined && hasNamedWorkflow) {
 		return { ok: false, error: "Named workflow resource execution must omit action.", mode: "management" };
@@ -174,17 +173,8 @@ export function normalizePublicSubagentExecution<T extends PublicSubagentExecuti
 			}
 			return { ok: true, params: { ...params, action: normalizedAction } };
 		}
-		if (normalizedAction === "schedule.create") {
-			if (params.agent !== undefined || params.task !== undefined || params.step !== undefined) {
-				return { ok: false, error: "schedule.create requires workflowScript or workflowScriptPath and does not accept direct agent, task, or step execution fields.", mode: "management" };
-			}
-			if (!hasValidWorkflowInput) {
-				return { ok: false, error: "schedule.create requires a non-empty workflowScript or workflowScriptPath.", mode: "management" };
-			}
-			return { ok: true, params: { ...params, action: normalizedAction } };
-		}
 		if (hasWorkflowInput) {
-			return { ok: false, error: "Workflow execution must omit action; only validate and schedule.create accept action with workflowScript or workflowScriptPath.", mode: "management" };
+			return { ok: false, error: "Workflow execution must omit action; only validate accepts action with workflowScript or workflowScriptPath.", mode: "management" };
 		}
 		if (params.task !== undefined) {
 			return { ok: false, error: "Structured single-child task cannot be combined with a management/control action.", mode: "management" };

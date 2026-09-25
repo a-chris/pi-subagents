@@ -103,13 +103,4 @@ describe("inspector and project pane authority policy", () => {
 		assert.equal(isError, true);
 		assert.match(text, /Action 'inspector\.open' is not available from child-safe subagent fanout mode\./);
 	});
-
-	it("refuses schedule.create in child-safe fanout mode without prompting for authority", async () => {
-		let asked = 0;
-		const { text, isError } = await run("schedule.create", { scheduleCreate: "confirm" }, { confirm: async () => { asked += 1; return true; } }, true);
-
-		assert.equal(asked, 0);
-		assert.equal(isError, true);
-		assert.match(text, /Action 'schedule\.create' is not available from child-safe subagent fanout mode\./);
-	});
 });

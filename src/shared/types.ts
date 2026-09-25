@@ -656,13 +656,6 @@ export type ProcessTerminal =
 		diagnostic?: string;
 	});
 
-/** Identifies the durable schedule that launched a run, so its completion is attributable. */
-export interface ScheduleOrigin {
-	id: string;
-	name?: string;
-	quiet?: boolean;
-}
-
 export type SteeringActionState = "delivered" | "scheduled" | "pending" | "partial" | "recovered" | "failed";
 export type SteeringTargetState = "scheduled" | "pending" | "routed" | "queued" | "delivered" | "late" | "failed" | "recovered";
 
@@ -1396,11 +1389,6 @@ export interface Details {
 		globalEntries?: GlobalMissionIndexRecord[];
 		warnings: string[];
 	};
-	/** Project-scoped recurring schedule records and run history for management actions. */
-	schedules?: {
-		records?: unknown[];
-		runs?: unknown[];
-	};
 }
 
 // ============================================================================
@@ -1737,8 +1725,6 @@ export interface AsyncStatus {
 	workflowChildren?: WorkflowChildSummary;
 	parentWorkflowRunId?: string;
 	workflowKey?: string;
-	/** Set when a durable schedule launched this run, so completions can name their origin. */
-	scheduleOrigin?: ScheduleOrigin;
 	steps?: Array<{
 		/** Stable caller-facing child identity for inspect/status/stop. */
 		childId?: string;
@@ -2330,13 +2316,6 @@ export interface ProactiveSkillSubagentsConfig {
 export type ToolDescriptionMode = "full" | "compact" | "custom";
 export type InlineToolDisplay = "rich" | "summary";
 
-export interface ScheduledRunsConfig {
-	enabled?: boolean;
-	maxPending?: number;
-	/** Absolute or `~/` root for per-project durable schedules. */
-	storeRoot?: string;
-}
-
 export type FleetViewPlacement = "aboveEditor" | "belowEditor";
 
 export const FLEET_KEYBINDING_ACTIONS = [
@@ -2486,7 +2465,6 @@ export interface ExtensionConfig {
 	 *  - \"off\": never log slow result-index scans. */
 	resultScanLogging?: "all" | "activity" | "off";
 	proactiveSkillSubagents?: ProactiveSkillSubagentsConfig | false;
-	scheduledRuns?: ScheduledRunsConfig;
 	/** Durable mission behavior. Missions are automatic by default; set enabled:false to disable auto-create. Explicit mission actions/fields still work. */
 	missions?: MissionStoreConfig;
 	/** Small fixed authority policy for the supported operational actions. */
@@ -2595,7 +2573,7 @@ export const POLL_INTERVAL_MS = 250;
 export const WIDGET_ANIMATION_INTERVAL_MS = 1000;
 export const MAX_WIDGET_JOBS = 4;
 export const DEFAULT_SUBAGENT_MAX_DEPTH = 2;
-export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "guide", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.command", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "watchdog.recommend-model", "schedule.create", "schedule.list", "schedule.show", "schedule.history", "schedule.pause", "schedule.resume", "schedule.run", "schedule.run-due", "schedule.delete"] as const;
+export const SUBAGENT_ACTIONS = ["list", "get", "models", "children.list", "guide", "validate", "create", "update", "delete", "eject", "disable", "enable", "reset", "mission.create", "mission.list", "mission.show", "mission.update", "mission.resolve-decision", "mission.attach-run", "mission.close", "worktree.discard", "worktree.cleanup", "refine", "refine.show", "refine.rollback", "inspector.open", "inspector.command", "inspector.status", "inspector.close", "project.open", "project.status", "project.close", "status", "debug.run", "grant-spawn-budget", "interrupt", "resume", "steer", "stop", "dismiss", "doctor", "watchdog.status", "watchdog.check", "watchdog.configure", "watchdog.recommend-model"] as const;
 
 export const DEFAULT_FORK_PREAMBLE =
 	"You are a delegated subagent running from a fork of the parent session. " +

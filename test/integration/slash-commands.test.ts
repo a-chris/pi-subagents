@@ -3,11 +3,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
-import { visibleWidth } from "@earendil-works/pi-tui";
 
 import { registerAgent } from "../../src/api/agents.ts";
 import { clearRuntimeAgentsForPi } from "../../src/agents/runtime-agent-registry.ts";
-import { scheduledRunStorePath } from "../../src/runs/background/scheduled-runs.ts";
 import { updateActiveRunIndex } from "../../src/runs/background/active-run-index.ts";
 import { getArtifactPaths, getArtifactsDir } from "../../src/shared/artifacts.ts";
 import { ASYNC_DIR, DIRS } from "../../src/shared/types.ts";
@@ -659,64 +657,6 @@ describe("slash command custom message delivery", { skip: !available ? "slash-co
 		}, createState(process.cwd()));
 		assert.ok(commands.has("subagents-fleet"));
 		assert.equal(shortcuts.size, 0);
-	});
-
-	it("/subagents-stop keeps the selector within its allocated width", async () => {
-		await withTempProject("pi-stop-selector-width-", async (root) => {
-			const id = "scheduled-width-check";
-			const nextRunAt = "2099-01-01T00:00:00.000Z";
-			const scheduleDir = path.join(scheduledRunStorePath(root), id);
-			fs.mkdirSync(scheduleDir, { recursive: true });
-			fs.writeFileSync(path.join(scheduleDir, "schedule.json"), JSON.stringify({
-				schemaVersion: 1,
-				id,
-				name: "A very long scheduled run name with wide characters 中文🙂",
-				cwd: root,
-				trigger: { kind: "once", at: nextRunAt, nextRunAt },
-				target: { agent: "scout", task: "Inspect" },
-				overlap: "skip",
-				catchUp: "latest",
-				paused: false,
-				createdAt: "2026-08-06T00:00:00.000Z",
-				updatedAt: "2026-08-06T00:00:00.000Z",
-			}), "utf-8");
-
-			const commands = new Map<string, RegisteredSlashCommand>();
-			const pi = {
-				events: createEventBus(),
-				registerCommand(name: string, spec: RegisteredSlashCommand) { commands.set(name, spec); },
-				registerShortcut() {},
-				sendMessage() {},
-			};
-			const rendered = new Map<number, string[]>();
-			registerSlashCommands!(pi as never, createState(root));
-			await commands.get("subagents-stop")!.handler("", createCommandContext({
-				cwd: root,
-				hasUI: true,
-				custom: async (factory) => {
-					const component = (factory as (
-						tui: { requestRender(): void },
-						theme: { fg(name: string, text: string): string; bold(text: string): string },
-						keybindings: unknown,
-						done: (result: unknown) => void,
-					) => { render(width: number): string[] })(
-						{ requestRender() {} },
-						{ fg: (_name, text) => text, bold: (text) => text },
-						{},
-						() => {},
-					);
-					for (const width of [0, 1, 2, 3, 32]) rendered.set(width, component.render(width));
-					return undefined;
-				},
-			}));
-
-			for (const [width, lines] of rendered) {
-				assert.ok(lines.length > 0);
-				for (const line of lines) {
-					assert.ok(visibleWidth(line) <= width, `stop selector line exceeds render width: ${visibleWidth(line)} > ${width}`);
-				}
-			}
-		});
 	});
 
 	it("/subagents-stop forwards a child id for child-scoped stops", async () => {
