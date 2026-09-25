@@ -69,7 +69,7 @@ describe("required child extension host policy", () => {
 		const snapshot = resolveRequiredChildExtensions(sessionId);
 		handle.dispose();
 		try {
-			const launch = buildRunnerChildLaunch({ agent: "worker", task: "test", inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, requiredExtensions: snapshot }, { cwd: process.cwd(), id: "run", flatIndex: 0 }, { sessionEnabled: false, watchdogStatus() {} });
+			const launch = buildRunnerChildLaunch({ agent: "worker", task: "test", inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, requiredExtensions: snapshot }, { cwd: process.cwd(), id: "run", flatIndex: 0 }, { sessionEnabled: false });
 			assert.equal(launch.session.extensionPaths.at(-1), fs.realpathSync(file));
 			assert.deepEqual(launch.launchResolvedExtensions.required, ["runner-provider"]);
 		} finally { fs.rmSync(dir, { recursive: true, force: true }); }

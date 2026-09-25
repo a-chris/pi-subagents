@@ -185,20 +185,6 @@ export const events = {
 		return events.assistantMessage(["done", "```acceptance-report", JSON.stringify(report), "```"].join("\n"));
 	},
 
-	watchdogStatusWarning(severity: "concern" | "blocker", summary: string, overrides: Record<string, unknown> = {}): object {
-		const { seq = 1, runId, agent, childIndex, ...warning } = overrides;
-		return {
-			type: "subagent.watchdog.status",
-			seq,
-			phase: "idle",
-			ts: Date.now(),
-			...(runId ? { runId } : {}),
-			...(agent ? { agent } : {}),
-			...(childIndex !== undefined ? { childIndex, stepIndex: childIndex } : {}),
-			warning: { severity, importance: "high", category: "test-gap", summary, evidence: "The transcript claims tests passed but no test command ran.", recommendedAction: "Run the focused test before finishing.", addressed: false, stalemate: false, ...warning },
-		};
-	},
-
 	/** Assistant write tool call plus its successful tool result, as one completed write. */
 	completedWrite(filePath: string, content: string, model = "mock/test-model"): object[] {
 		const id = `write-${++writeCallSeq}`;

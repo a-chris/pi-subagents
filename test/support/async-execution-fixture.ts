@@ -17,7 +17,6 @@ import * as path from "node:path";
 import { asyncResultTimeoutEvidence } from "./async-result-timeout-evidence.ts";
 import { createEventBus, createMockPi, createTempDir, makeAgent, removeTempDir, resolveMockPiCallArgs, tryImport } from "./helpers.ts";
 import type { MockPi } from "./helpers.ts";
-import { CHILD_WATCHDOG_STATUS_EVENT } from "../../src/watchdog/child-status.ts";
 
 interface LaunchResolvedExtensions {
 	version?: number;
@@ -156,55 +155,6 @@ async function waitForMockPiRuntime(mockPi: MockPi, index: number, timeoutMs = 3
 		if (Date.now() > deadline) assert.fail(`Timed out waiting for recorded mock pi call ${index}`);
 		await new Promise((resolve) => setTimeout(resolve, 100));
 	}
-}
-
-function writeWatchdogSettings(projectDir: string, tailMs = 120_000): void {
-	const settingsPath = path.join(projectDir, ".pi", "settings.json");
-	fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-	fs.writeFileSync(settingsPath, JSON.stringify({
-		subagents: {
-			watchdog: {
-				enabled: true,
-				children: {
-					enabled: true,
-					watchdogTailTimeoutMs: tailMs,
-				},
-			},
-		},
-	}, null, 2), "utf-8");
-}
-
-async function withIsolatedWatchdogSettings<T>(projectDir: string, run: () => Promise<T>): Promise<T> {
-	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-	const previousHome = process.env.HOME;
-	const previousUserProfile = process.env.USERPROFILE;
-	const isolatedHome = path.join(projectDir, "isolated-home");
-	process.env.PI_CODING_AGENT_DIR = path.join(isolatedHome, ".pi", "agent");
-	process.env.HOME = isolatedHome;
-	process.env.USERPROFILE = isolatedHome;
-	try {
-		return await run();
-	} finally {
-		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-		if (previousHome === undefined) delete process.env.HOME;
-		else process.env.HOME = previousHome;
-		if (previousUserProfile === undefined) delete process.env.USERPROFILE;
-		else process.env.USERPROFILE = previousUserProfile;
-	}
-}
-
-function childWatchdogStatus(runId: string, phase: "idle" | "reviewing" | "stale" | "failed", seq: number) {
-	return {
-		type: CHILD_WATCHDOG_STATUS_EVENT,
-		runId,
-		agent: "worker",
-		childIndex: 0,
-		stepIndex: 0,
-		seq,
-		phase,
-		ts: Date.now() + seq,
-	};
 }
 
 function mockAssistantMessage(text: string, stopReason: "stop" | "tool_use" = "stop") {
@@ -659,8 +609,8 @@ export {
 	resolveTargetedAsyncRun, readStatus, pruneStatusCacheForAsyncRoot,
 	ASYNC_DIR, RESULTS_DIR, TEMP_ROOT_DIR, createSubagentExecutor,
 	tempDir, mockPi, makeAsyncExecutor, readAsyncPayload, launchProtocolTest,
-	waitForMockPiRuntime, writeWatchdogSettings, withIsolatedWatchdogSettings,
-	childWatchdogStatus, mockAssistantMessage, escapeRegExp, createRepo,
+	waitForMockPiRuntime,
+	mockAssistantMessage, escapeRegExp, createRepo,
 	writePackageSkill, readIfExists, waitForAsyncResultFile, waitForAsyncEvent,
 	waitForAsyncState, waitForMockPiCall, readLastMockPiArgs,
 	readMockPiArgs, readMockPiRequiredTools, readMockPiArgsMatching,

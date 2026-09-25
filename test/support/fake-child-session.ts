@@ -13,7 +13,6 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ChildSession, ChildSessionEvent, ChildSessionFactory, ChildSessionLaunch } from "../../src/runs/shared/child-session.ts";
-import { isChildWatchdogStatusEvent } from "../../src/watchdog/child-status.ts";
 
 export interface FakeChildResponse {
 	output?: string;
@@ -313,8 +312,7 @@ export function createFakeChildSessions(queueDir: () => string): FakeChildSessio
 						// Native acceptance lives in system resources, not the compactable task.
 						if (!providerError && textPart && typeof textPart.text === "string" && (!sawProviderError || textPart.text.trim())) textPart.text = withAcceptanceReport(textPart.text, [launch.systemPrompt, launch.appendSystemPrompt, task].join("\n"));
 					}
-					// A real child's watchdog hook reports through the host's sink, not the session stream.
-					if (isChildWatchdogStatusEvent(entry)) launch.runtime.watchdogStatus?.(entry);
+					// A real child's hook reports through the host's sink, not the session stream.
 					else emit(entry);
 					await Promise.resolve();
 				}

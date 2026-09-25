@@ -24,8 +24,7 @@ import {
 	resolveMockPiCallArgs,
 	tryImport,
 } from "./helpers.ts";
-import type { ChildWatchdogProgress, SubagentState } from "../../src/shared/types.ts";
-import { CHILD_WATCHDOG_STATUS_EVENT } from "../../src/watchdog/child-status.ts";
+import type { SubagentState } from "../../src/shared/types.ts";
 import type { ChildRuntimeConfig } from "../../src/runs/shared/child-runtime-config.ts";
 
 interface ProgressSummary {
@@ -110,7 +109,6 @@ interface RunSyncResult {
 		verifyRuns?: Array<{ status?: string }>;
 		runtimeChecks?: Array<{ id?: string; status?: string; message?: string }>;
 	};
-	watchdog?: ChildWatchdogProgress;
 	launchResolvedExtensions?: LaunchResolvedExtensions;
 	runtimeAcknowledgedExtensions?: RuntimeAcknowledgedExtensions;
 }
@@ -124,55 +122,6 @@ interface MockPiCallRecord {
 	launch?: { cwd: string; storage: { kind: string; sessionFile?: string; sessionDir?: string }; model?: string; tools?: string[]; excludeTools?: string[]; extensionPaths: string[]; hooks: string[]; noSkills: boolean; noContextFiles: boolean };
 	/** Typed child runtime config the in-process hooks received. */
 	runtime?: Record<string, unknown> & { sessionName?: string; orchestratorTarget?: string; runId?: string; agent?: string; childIndex?: number; fanoutChild?: boolean; nestedParent?: { parentRunId: string; parentChildIndex?: number; depth: number }; depth?: number; maxDepth?: number; waitTool?: { enabled: boolean }; inheritProjectContext?: boolean; inheritSkills?: boolean; toolBudget?: unknown };
-}
-
-function writeWatchdogSettings(projectDir: string, tailMs = 120_000): void {
-	const settingsPath = path.join(projectDir, ".pi", "settings.json");
-	fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-	fs.writeFileSync(settingsPath, JSON.stringify({
-		subagents: {
-			watchdog: {
-				enabled: true,
-				children: {
-					enabled: true,
-					watchdogTailTimeoutMs: tailMs,
-				},
-			},
-		},
-	}, null, 2), "utf-8");
-}
-
-async function withIsolatedWatchdogSettings<T>(projectDir: string, run: () => Promise<T>): Promise<T> {
-	const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
-	const previousHome = process.env.HOME;
-	const previousUserProfile = process.env.USERPROFILE;
-	const isolatedHome = path.join(projectDir, "isolated-home");
-	process.env.PI_CODING_AGENT_DIR = path.join(isolatedHome, ".pi", "agent");
-	process.env.HOME = isolatedHome;
-	process.env.USERPROFILE = isolatedHome;
-	try {
-		return await run();
-	} finally {
-		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-		else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-		if (previousHome === undefined) delete process.env.HOME;
-		else process.env.HOME = previousHome;
-		if (previousUserProfile === undefined) delete process.env.USERPROFILE;
-		else process.env.USERPROFILE = previousUserProfile;
-	}
-}
-
-function childWatchdogStatus(phase: "idle" | "reviewing" | "stale" | "failed", seq: number) {
-	return {
-		type: CHILD_WATCHDOG_STATUS_EVENT,
-		runId: "watchdog-child-run",
-		agent: "echo",
-		childIndex: 0,
-		stepIndex: 0,
-		seq,
-		phase,
-		ts: Date.now() + seq,
-	};
 }
 
 function mockAssistantMessage(text: string, stopReason: "stop" | "tool_use" = "stop") {
@@ -370,8 +319,8 @@ export function installSingleExecutionHooks() {
 export {
 	tempDir, agentDir, mockPi, available, runSync, getFinalOutput, utils,
 	createSubagentExecutor, executorMod, escapeRegExp, pathContainsSegments,
-	waitForFileContent, writePackageSkill, writeWatchdogSettings,
-	withIsolatedWatchdogSettings, childWatchdogStatus, mockAssistantMessage,
+	waitForFileContent, writePackageSkill,
+	mockAssistantMessage,
 	readCall, readCallArgs, readAllCallArgs, makeExecutor,
 };
 export type {

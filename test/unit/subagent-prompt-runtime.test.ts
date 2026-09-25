@@ -9,8 +9,6 @@ import { clearStructuredOutputCaptures } from "../../src/runs/shared/structured-
 import { getAgentDir } from "../../src/shared/utils.ts";
 import { formatChildToolDiagnostic, type ChildToolDiagnostic } from "../../src/runs/shared/tool-availability.ts";
 import type { ChildRuntimeConfig } from "../../src/runs/shared/child-runtime-config.ts";
-import type { ChildWatchdogConfig } from "../../src/watchdog/child-status.ts";
-import { SUBAGENT_WATCHDOG_WARNING_TYPE } from "../../src/watchdog/types.ts";
 import { randomUUID } from "node:crypto";
 import { createNestedRoute, nestedResultsPath } from "../../src/runs/shared/nested-events.ts";
 import { updateActiveRunIndex } from "../../src/runs/background/active-run-index.ts";
@@ -18,7 +16,6 @@ import { SUBAGENT_ASYNC_COMPLETE_EVENT, TEMP_ROOT_DIR, SUBAGENT_FOREGROUND_COMPL
 import registerSubagentPromptRuntime, {
 	CHILD_FANOUT_BOUNDARY_INSTRUCTIONS,
 	CHILD_SUBAGENT_BOUNDARY_INSTRUCTIONS,
-	registerPermissionGate,
 	rewriteSubagentPrompt,
 	stripGlobalContext,
 	stripInheritedSkills,
@@ -150,19 +147,6 @@ function supervisorConfig(overrides: Partial<ChildRuntimeConfig> = {}): ChildRun
 	});
 }
 
-const watchdogConfig: ChildWatchdogConfig = {
-	enabled: true,
-	runId: "run-1",
-	agent: "worker",
-	childIndex: 0,
-	watchdogTailTimeoutMs: 1000,
-	agentEndTimeoutMs: 500,
-	maxWarnings: null,
-	lsp: { enabled: false, timeoutMs: 3000, maxFiles: 20, maxDiagnostics: 50 },
-	stalemateRepeats: 2,
-	cadence: { everyNTools: null },
-} as ChildWatchdogConfig;
-
 const SKILLS_SECTION = "\n\nThe following skills provide specialized instructions for specific tasks.\nUse the read tool to load a skill's file when the task matches its description.\nWhen a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n\n<available_skills>\n  <skill>\n    <name>safe-bash</name>\n    <description>desc</description>\n    <location>/tmp/SKILL.md</location>\n  </skill>\n  <skill>\n    <name>pi-subagents</name>\n    <description>delegate to subagents</description>\n    <location>/tmp/pi-subagents/SKILL.md</location>\n  </skill>\n</available_skills>";
 
 const BASE_PROMPT = [
@@ -188,24 +172,6 @@ describe("subagent prompt runtime", () => {
 	});
 
 
-	it("fails closed when an ask permission decision stalls", async () => {
-		{
-			const stallingWatchdog = { ...watchdogConfig, agentEndTimeoutMs: 5, lsp: { enabled: false, timeoutMs: 100, maxFiles: 1, maxDiagnostics: 1 } } as ChildWatchdogConfig;
-			const handlers: Array<(event: { toolName?: string; input?: unknown }, ctx: { signal?: AbortSignal }) => unknown> = [];
-			registerPermissionGate({ on(event: string, handler: (event: { toolName?: string; input?: unknown }, ctx: { signal?: AbortSignal }) => unknown) { if (event === "tool_call") handlers.push(handler); } } as never, { rules: { write: "ask" } }, stallingWatchdog, async () => new Promise(() => undefined));
-
-			const result = await Promise.race([
-				handlers[0]!({ toolName: "write", input: { path: "out.txt" } }, { signal: undefined }),
-				new Promise((resolve) => setTimeout(() => resolve("hung"), 100)),
-			]);
-
-			assert.notEqual(result, "hung");
-			assert.deepEqual(result, {
-				block: true,
-				reason: "Blocked by pi-subagents permission rule: Watchdog permission arbiter failed closed: Watchdog permission decision timed out after 5ms.",
-			});
-		}
-	});
 	it("collects runtime extension acknowledgements until terminal serialization", () => {
 		{
 			const acknowledged: string[][] = [];
@@ -258,32 +224,6 @@ describe("subagent prompt runtime", () => {
 		});
 		assert.equal(toolCall({ toolName: "write" }), undefined);
 	});
-
-	it("registers child watchdog lifecycle handlers only when the config enables them", () => {
-		const handlersWithout = new Map<string, unknown[]>();
-		registerSubagentPromptRuntime({
-			on(event: string, handler: unknown) {
-				handlersWithout.set(event, [...(handlersWithout.get(event) ?? []), handler]);
-			},
-		} as { on(event: string, handler: unknown): void }, childConfig());
-		assert.equal(handlersWithout.get("agent_end")?.length ?? 0, 1, "headless auto-drain is always registered");
-
-		const handlersWith = new Map<string, unknown[]>();
-		registerSubagentPromptRuntime({
-			on(event: string, handler: unknown) {
-				handlersWith.set(event, [...(handlersWith.get(event) ?? []), handler]);
-			},
-			getThinkingLevel() {
-				return "off";
-			},
-			sendMessage() {},
-		} as { on(event: string, handler: unknown): void; getThinkingLevel(): string; sendMessage(): void }, childConfig({ childWatchdog: watchdogConfig, watchdogStatus: () => {} }));
-
-		assert.ok((handlersWith.get("before_agent_start")?.length ?? 0) >= 2);
-		assert.ok((handlersWith.get("turn_end")?.length ?? 0) >= 1);
-		assert.ok((handlersWith.get("agent_end")?.length ?? 0) >= 2, "watchdog and auto-drain both observe agent_end");
-	});
-
 	it("registered structured_output tool accepts valid schema output and captures it", async () => {
 		{
 			const captured: unknown[] = [];
@@ -654,11 +594,9 @@ describe("subagent prompt runtime", () => {
 		const slashTextResult = { role: "custom", customType: "subagent-slash-text-result", content: "Subagent profiles" };
 		const notify = { role: "custom", customType: "subagent-notify", content: "Background task completed" };
 		const control = { role: "custom", customType: "subagent_control_notice", content: "needs attention" };
-		const watchdogWarning = { role: "custom", customType: SUBAGENT_WATCHDOG_WARNING_TYPE, content: "<subagent_watchdog>parent-only</subagent_watchdog>" };
-		const childWatchdogWarning = { role: "custom", customType: SUBAGENT_WATCHDOG_WARNING_TYPE, content: "<subagent_watchdog>child-visible</subagent_watchdog>", details: { source: "child" } };
 		const otherCustom = { role: "custom", customType: "other", content: "keep" };
 
-		assert.deepEqual(stripParentOnlySubagentMessages([user, instruction, slashResult, slashTextResult, notify, control, watchdogWarning, childWatchdogWarning, otherCustom]), [user, otherCustom]);
+		assert.deepEqual(stripParentOnlySubagentMessages([user, instruction, slashResult, slashTextResult, notify, control, otherCustom]), [user, otherCustom]);
 	});
 
 	it("strips prior parent subagent tool calls and results from forked child context", () => {
@@ -816,11 +754,9 @@ describe("subagent prompt runtime", () => {
 		const slashResult = { role: "custom", customType: "subagent-slash-result", content: "## Orchestration" };
 		const subagentResult = { role: "toolResult", toolName: "subagent", content: "subagent results" };
 		const subagentCall = { role: "assistant", content: [{ type: "toolCall", name: "subagent", input: { agent: "worker" } }] };
-		const watchdogWarning = { role: "custom", customType: SUBAGENT_WATCHDOG_WARNING_TYPE, content: "<subagent_watchdog>parent-only</subagent_watchdog>" };
-		const childWatchdogWarning = { role: "custom", customType: SUBAGENT_WATCHDOG_WARNING_TYPE, content: "<subagent_watchdog>child-visible</subagent_watchdog>", details: { source: "child" } };
 		const otherCustom = { role: "custom", customType: "other", content: "keep" };
 
-		assert.deepEqual(contextHandler?.({ messages: [priorParentTurn, instruction, slashResult, subagentCall, subagentResult, watchdogWarning, childWatchdogWarning, otherCustom, currentTask] }), {
+		assert.deepEqual(contextHandler?.({ messages: [priorParentTurn, instruction, slashResult, subagentCall, subagentResult, otherCustom, currentTask] }), {
 			messages: [priorParentTurn, otherCustom, currentTask],
 		});
 	});

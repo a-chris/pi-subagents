@@ -601,7 +601,7 @@ describe("SubagentParams schema", { skip: !schemasAvailable ? "typebox not avail
 		assert.ok(CompileSchema, "TypeBox compiler should exist");
 		const validator = CompileSchema(SubagentParams);
 		// Transport accepts both booleans; semantic boundaries still reject unsupported true.
-		for (const field of ["acceptance", "mission", "thinking"]) {
+		for (const field of ["acceptance", "mission"]) {
 			assert.deepEqual(anyOfBranches(SubagentParams.properties[field]).find((branch) => branch.type === "boolean"), { type: "boolean" });
 			assert.equal(validator.Check({ [field]: false }), true);
 			assert.equal(validator.Check({ [field]: true }), true);
